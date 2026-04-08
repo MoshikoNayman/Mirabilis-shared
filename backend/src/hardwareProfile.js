@@ -47,6 +47,26 @@ const APPLE_NEURAL_ENGINE_MAP = [
   ['apple m1', '16C']
 ];
 
+// P-core max boost clocks (official Apple specs)
+const APPLE_CLOCK_MAP = [
+  ['apple m4 ultra', '4.5 GHz'],
+  ['apple m4 max',   '4.5 GHz'],
+  ['apple m4 pro',   '4.5 GHz'],
+  ['apple m4',       '4.4 GHz'],
+  ['apple m3 ultra', '4.1 GHz'],
+  ['apple m3 max',   '4.1 GHz'],
+  ['apple m3 pro',   '4.1 GHz'],
+  ['apple m3',       '4.1 GHz'],
+  ['apple m2 ultra', '3.5 GHz'],
+  ['apple m2 max',   '3.5 GHz'],
+  ['apple m2 pro',   '3.5 GHz'],
+  ['apple m2',       '3.5 GHz'],
+  ['apple m1 ultra', '3.2 GHz'],
+  ['apple m1 max',   '3.2 GHz'],
+  ['apple m1 pro',   '3.2 GHz'],
+  ['apple m1',       '3.2 GHz']
+];
+
 function normalizeWhitespace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -174,6 +194,14 @@ function lookupAppleNeuralEngine(chipName) {
   return '';
 }
 
+function lookupAppleClock(chipName) {
+  const lower = String(chipName || '').toLowerCase();
+  for (const [needle, clock] of APPLE_CLOCK_MAP) {
+    if (lower.includes(needle)) return clock;
+  }
+  return null;
+}
+
 function formatCacheBytes(value) {
   const n = Number(value);
   if (!n) return null;
@@ -295,8 +323,7 @@ async function getDarwinProfile() {
   const cpuThreads = Math.max(cpuCores, Number(logicalCpuText) || (typeof os.availableParallelism === 'function' ? os.availableParallelism() : cpuCores));
   const memorySize = normalizeWhitespace(hardware.physical_memory || formatGb(os.totalmem() / (1024 ** 3)));
   const bandwidth = lookupAppleBandwidth(cpuModel);
-  const rawCpuSpeed = normalizeWhitespace(hardware.current_processor_speed || '');
-  const cpuClock = rawCpuSpeed && !/^(unknown|n\/a)$/i.test(rawCpuSpeed) ? rawCpuSpeed : null;
+  const cpuClock = lookupAppleClock(cpuModel);
 
   const cpuCaches = {
     l1: formatCacheBytes(l1CacheText),
