@@ -3824,7 +3824,7 @@ export default function ChatApp() {
               </div>
             </div>
 
-            <div className="flex items-end gap-2">
+            <div className="flex items-stretch gap-2">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -3832,7 +3832,7 @@ export default function ChatApp() {
                 className="hidden"
                 onChange={handleAttachFiles}
               />
-              <div className="relative flex shrink-0 flex-col items-center gap-0.5">
+              <div className="relative flex shrink-0 flex-col items-center justify-between">
                 <button
                   type="button"
                   onClick={toggleDictation}
@@ -3888,7 +3888,7 @@ export default function ChatApp() {
                 rows={3}
                 className="w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
               />
-              <div className="flex w-[4.25rem] shrink-0 flex-col items-stretch gap-0.5">
+              <div className="flex w-[4.25rem] shrink-0 flex-col items-stretch justify-between">
                 <div data-menu-container="true" className="relative">
                 <button
                   type="button"
@@ -4079,7 +4079,7 @@ export default function ChatApp() {
 
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
-                  className={`h-12 w-full rounded-xl px-2 text-sm font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition ${isStreaming ? 'bg-red-500 hover:brightness-95' : 'bg-accent hover:brightness-95'}`}
+                  className={`flex-1 w-full rounded-xl px-2 text-sm font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition ${isStreaming ? 'bg-red-500 hover:brightness-95' : 'bg-accent hover:brightness-95'}`}
                 >
                   {isStreaming ? 'Stop' : 'Send'}
                 </button>
