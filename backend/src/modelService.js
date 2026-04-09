@@ -297,7 +297,7 @@ export async function listModels(config, provider = config.aiProvider, options =
   return [...curated, ...extraModels];
 }
 
-export async function streamWithProvider({ provider, model, messages, config, signal, onToken, overrideBaseUrl, overrideApiKey }) {
+export async function streamWithProvider({ provider, model, messages, config, signal, onToken, overrideBaseUrl, overrideApiKey, temperature, maxTokens }) {
   if (provider === 'openai-compatible') {
     return streamOpenAICompatibleChat({
       baseUrl: overrideBaseUrl || config.openAIBaseUrl,
@@ -305,7 +305,9 @@ export async function streamWithProvider({ provider, model, messages, config, si
       model,
       messages,
       signal,
-      onToken
+      onToken,
+      temperature,
+      maxTokens,
     });
   }
 
@@ -316,7 +318,9 @@ export async function streamWithProvider({ provider, model, messages, config, si
       model,
       messages,
       signal,
-      onToken
+      onToken,
+      temperature,
+      maxTokens,
     });
   }
 
@@ -325,6 +329,8 @@ export async function streamWithProvider({ provider, model, messages, config, si
     model,
     messages,
     signal,
-    onToken
+    onToken,
+    temperature,
+    maxTokens,
   });
 }

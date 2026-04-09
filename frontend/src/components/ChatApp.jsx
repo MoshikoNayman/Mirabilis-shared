@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -203,6 +203,32 @@ function CopyMessageButton({ text }) {
   );
 }
 
+// Detects whether text contains Hebrew or Arabic characters so we can force RTL
+// on the entire message block instead of relying on the browser's `dir="auto"` scan,
+// which is unreliable for list containers when content is mixed or nested.
+const RTL_CHARS_RE = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+// Static markdown component overrides — defined at module level so they're never recreated.
+// These elements intentionally carry NO `dir` attribute; they inherit direction from the
+// outer wrapper which is set explicitly in renderMessageContent via RTL_CHARS_RE.
+// `p` and headings keep `dir="auto"` for correct per-paragraph alignment in mixed-lang replies.
+const MD_STATIC_COMPONENTS = {
+  h1: ({ children }) => <h1 className="mb-2 mt-3 text-xl font-bold" dir="auto">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-1.5 mt-3 text-lg font-bold" dir="auto">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-1 mt-2 text-base font-semibold" dir="auto">{children}</h3>,
+  p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed" dir="auto">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 ps-4 list-disc space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 ps-4 list-decimal space-y-1">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-2 border-s-2 border-accent ps-3 text-slate-500 italic dark:text-slate-400">{children}</blockquote>
+  ),
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:brightness-90">{children}</a>
+  ),
+};
+
 function renderMessageContent(content, message = {}, remoteCtx = {}) {
   const { remoteConnectedRef, remoteTargetRef, execResultsRef, onRunCommand } = remoteCtx;
   if (message.imageGenerating) {
@@ -233,6 +259,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
   const isShellLang = (l) => ['bash', 'sh', 'shell', 'zsh', 'fish', 'cmd', 'powershell', 'ps1'].includes(l);
 
   const mdComponents = {
+    ...MD_STATIC_COMPONENTS,
     code({ inline, className, children, ...props }) {
       const lang = (className || '').replace('language-', '') || 'code';
       const codeText = String(children).replace(/\n$/, '');
@@ -283,28 +310,293 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
         </figure>
       );
     },
-    h1: ({ children }) => <h1 className="mb-2 mt-3 text-xl font-bold">{children}</h1>,
-    h2: ({ children }) => <h2 className="mb-1.5 mt-3 text-lg font-bold">{children}</h2>,
-    h3: ({ children }) => <h3 className="mb-1 mt-2 text-base font-semibold">{children}</h3>,
-    p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-    ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-1">{children}</ul>,
-    ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-1">{children}</ol>,
-    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-    blockquote: ({ children }) => (
-      <blockquote className="my-2 border-l-2 border-accent pl-3 text-slate-500 italic dark:text-slate-400">{children}</blockquote>
-    ),
-    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-    a: ({ href, children }) => (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:brightness-90">{children}</a>
-    ),
   };
 
+  // Detect RTL once from the full text so the entire block — including list
+  // containers — gets a concrete direction that all descendants inherit.
+  const dir = RTL_CHARS_RE.test(text) ? 'rtl' : 'ltr';
+
   return (
-    <div className="markdown-body text-sm">
+    <div className="markdown-body text-sm" dir={dir}>
       <ReactMarkdown components={mdComponents}>{text}</ReactMarkdown>
     </div>
   );
 }
+
+// Memoised sidebar chat row — comparator ignores callbacks so typing / streaming
+// never causes the full chat list to reconcile; only the affected item re-renders.
+const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, onSelect, onToggleMenu, onDelete, onRename, onExport, onTogglePin }) {
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+
+  function startRename() {
+    setRenameValue(chat.title || '');
+    setIsRenaming(true);
+    onToggleMenu(null);
+  }
+
+  function commitRename(e) {
+    if (e) e.preventDefault();
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== chat.title) {
+      onRename(chat.id, trimmed);
+    }
+    setIsRenaming(false);
+  }
+
+  return (
+    <li>
+      <div
+        data-chat-item={chat.id}
+        className={`group relative flex items-start gap-2 rounded-xl border px-2 py-2 transition ${
+          isActive
+            ? 'border-accent bg-accentSoft/80 dark:bg-accent/20'
+            : 'border-black/10 bg-white/75 hover:bg-white dark:border-white/10 dark:bg-slate-800/60 dark:hover:bg-slate-700/60'
+        }`}
+      >
+        {isPinned && (
+          <span className="mt-1 shrink-0 text-accent" title="Pinned" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="currentColor" aria-hidden="true">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+            </svg>
+          </span>
+        )}
+        {isRenaming ? (
+          <form onSubmit={commitRename} className="flex-1 min-w-0">
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { setIsRenaming(false); e.stopPropagation(); }
+              }}
+              className="w-full rounded border border-accent/50 bg-white px-1.5 py-0.5 text-sm outline-none dark:bg-slate-800 dark:text-slate-100"
+            />
+          </form>
+        ) : (
+          <button onClick={() => onSelect(chat.id)} className="min-w-0 flex-1 text-left">
+            <div className="line-clamp-1 text-sm font-medium">{chat.title}</div>
+            <div className="text-[10px] text-slate-500 dark:text-slate-300">{formatTime(chat.updatedAt)}</div>
+          </button>
+        )}
+        {!isRenaming && (
+          <button
+            type="button"
+            aria-label={`More actions for ${chat.title}`}
+            title="Chat actions"
+            className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 opacity-0 transition hover:bg-black/5 hover:text-slate-700 group-hover:opacity-100 focus:opacity-100 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-200"
+            onClick={() => onToggleMenu(chat.id)}
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="currentColor">
+              <circle cx="5" cy="12" r="1.8" />
+              <circle cx="12" cy="12" r="1.8" />
+              <circle cx="19" cy="12" r="1.8" />
+            </svg>
+          </button>
+        )}
+        {isMenuOpen && (
+          <div className="absolute right-2 top-10 z-10 min-w-36 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              onClick={startRename}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+              <span>Rename</span>
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              onClick={() => { onTogglePin(chat.id); onToggleMenu(null); }}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill={isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+              </svg>
+              <span>{isPinned ? 'Unpin' : 'Pin'}</span>
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              onClick={() => { onExport(chat.id); onToggleMenu(null); }}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span>Export .md</span>
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
+              onClick={() => onDelete(chat.id)}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18" />
+                <path d="M8 6V4.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3V6" />
+                <path d="M6.5 6l1 12.2c.1.8.7 1.3 1.5 1.3h6c.8 0 1.4-.5 1.5-1.3L17.5 6" />
+                <path d="M10 10.2v5.6" />
+                <path d="M14 10.2v5.6" />
+              </svg>
+              <span>Delete</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}, (prev, next) => (
+  prev.chat === next.chat &&
+  prev.isActive === next.isActive &&
+  prev.isMenuOpen === next.isMenuOpen &&
+  prev.isPinned === next.isPinned
+));
+
+// Memoised message bubble — only re-renders when its own data or speaking state changes.
+// During streaming, only the last message gets a new `message` object reference, so all prior
+// messages are skipped by the custom comparator, preventing O(n) re-renders per token.
+const MessageRow = memo(function MessageRow({
+  message,
+  isLast,
+  isStreaming,
+  speakingMessageId,
+  isSpeaking,
+  voiceEngine,
+  voiceSupported,
+  remoteConnectedRef,
+  remoteTargetRef,
+  execResultsRef,
+  runCommand,
+  stopSpeaking,
+  speakText,
+  regenerate,
+}) {
+  const isLastAssistant = message.role === 'assistant' && !message.imageGenerating && isLast;
+  return (
+    <article
+      className={`fade-in max-w-[90%] rounded-2xl px-3 py-2 text-sm shadow-sm sm:max-w-[75%] ${
+        message.role === 'user'
+          ? 'ml-auto bg-accent text-white shadow-[0_10px_22px_-14px_rgba(26,168,111,0.9)]'
+          : speakingMessageId === message.id
+          ? 'border border-accent/50 bg-accentSoft/35 text-slate-800 shadow-[0_0_0_1px_rgba(26,168,111,0.15)] dark:border-accent/60 dark:bg-accent/10 dark:text-slate-100'
+          : 'border border-black/10 bg-white text-slate-800 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100'
+      }`}
+    >
+      <div className="mb-1 flex items-center justify-between gap-3 text-[10px] uppercase opacity-70">
+        <span>{message.role}</span>
+        <span className="font-mono normal-case opacity-80">
+          Est. {formatTokenCount(message.tokenEstimate || 0)}
+        </span>
+      </div>
+      {isStreaming && !message.content && message.role === 'assistant' && isLast
+        ? (
+          <div className="flex items-center gap-1.5 py-1">
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
+          </div>
+        )
+        : renderMessageContent(message.content, message, { remoteConnectedRef, remoteTargetRef, execResultsRef, onRunCommand: runCommand })}
+      {Array.isArray(message.attachments) && message.attachments.length > 0 && (
+        <div className="mt-2 grid gap-2">
+          {message.attachments.map((file) => {
+            const isImage = String(file.mimeType || '').startsWith('image/');
+            return (
+              <div key={file.storedName || file.url} className="rounded-xl border border-black/10 bg-white/80 p-2 dark:border-white/10 dark:bg-slate-900/50">
+                {isImage && file.url ? (
+                  <img
+                    src={`${API_BASE}${file.url}`}
+                    alt={file.name || 'Uploaded image'}
+                    className="mb-2 max-h-52 rounded-lg object-contain"
+                  />
+                ) : null}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-medium">{file.name || 'file'}</div>
+                    <div className="text-[10px] opacity-70">{file.mimeType || 'application/octet-stream'} · {formatFileSize(file.size)}</div>
+                  </div>
+                  {file.url ? (
+                    <a
+                      href={`${API_BASE}${file.url}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-md border border-black/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+                    >
+                      Open
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {message.role === 'assistant' && message.usage?.isEstimate && (
+        <div className="mt-2 font-mono text-[10px] opacity-60">
+          Est. context {formatTokenCount(message.usage.promptTokens)} · Est. total {formatTokenCount(message.usage.totalTokens)}
+        </div>
+      )}
+      {message.role === 'assistant' && !message.imageGenerating && (
+        <div className="mt-2 flex justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              if (speakingMessageId === message.id && isSpeaking) stopSpeaking();
+              else speakText(message.content || '', message.id);
+            }}
+            disabled={(voiceEngine === 'browser' && !voiceSupported) || !String(message.content || '').trim()}
+            title={speakingMessageId === message.id && isSpeaking ? 'Stop speaking' : 'Speak response'}
+            className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition disabled:opacity-40 ${
+              speakingMessageId === message.id && isSpeaking
+                ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                : 'text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200'
+            }`}
+          >
+            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 12h1" />
+              <path d="M8 9v6" />
+              <path d="M12 7v10" />
+              <path d="M16 9v6" />
+              <path d="M20 11v2" />
+            </svg>
+            {speakingMessageId === message.id && isSpeaking ? 'Stop' : 'Speak'}
+          </button>
+
+          {isLastAssistant && (
+            <button
+              onClick={regenerate}
+              disabled={isStreaming}
+              title="Regenerate response"
+              className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-400 transition hover:bg-black/5 hover:text-slate-700 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+            >
+              <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 4a8 8 0 0 1 12 0" />
+                <path d="M16 16a8 8 0 0 1-12 0" />
+                <polyline points="13 1 16 4 13 7" />
+                <polyline points="7 19 4 16 7 13" />
+              </svg>
+              Regenerate
+            </button>
+          )}
+
+          <CopyMessageButton text={message.content || ''} />
+        </div>
+      )}
+    </article>
+  );
+}, (prev, next) => (
+  prev.message === next.message &&
+  prev.isLast === next.isLast &&
+  prev.isStreaming === next.isStreaming &&
+  prev.speakingMessageId === next.speakingMessageId &&
+  prev.isSpeaking === next.isSpeaking &&
+  prev.voiceEngine === next.voiceEngine &&
+  prev.voiceSupported === next.voiceSupported
+));
 
 export default function ChatApp() {
   const fileInputRef = useRef(null);
@@ -323,6 +615,7 @@ export default function ChatApp() {
   const execResultsRef = useRef({});
   const lastKeyboardMenuTriggerRef = useRef(null);
   const streamAbortRef = useRef(null);
+  const shortcutRef = useRef({});
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -366,8 +659,10 @@ export default function ChatApp() {
     memory: null,
     action: { label: 'Engine', options: [] }
   });
+  const [utilization, setUtilization] = useState({ cpuPct: 0, memPct: 0 });
   const [openHardwarePopover, setOpenHardwarePopover] = useState(null);
   const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
+  const [isSystemPromptVisible, setIsSystemPromptVisible] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState(() => {
     if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-engine-option') || '';
     return '';
@@ -387,7 +682,7 @@ export default function ChatApp() {
     if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-openclaw') === 'true';
     return false;
   });
-  const [isOpenClawInfoOpen, setIsOpenClawInfoOpen] = useState(false);
+
   const [trainingStats, setTrainingStats] = useState({ memoryItems: 0, fineTuningExamples: 0 });
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [dictationSupported, setDictationSupported] = useState(false);
@@ -452,6 +747,28 @@ export default function ChatApp() {
   const [execResults, setExecResults] = useState({}); // codeBlockKey → { stdout, stderr, exitCode, running }
   const [uncensoredMode, setUncensoredMode] = useState(false);
   const [isMcpPanelOpen, setIsMcpPanelOpen] = useState(false);
+  const [isParamsPanelOpen, setIsParamsPanelOpen] = useState(false);
+  const [chatSearch, setChatSearch] = useState('');
+  const [pinnedChatIds, setPinnedChatIds] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try { return new Set(JSON.parse(window.localStorage.getItem('mirabilis-pinned-chats') || '[]')); } catch { return new Set(); }
+    }
+    return new Set();
+  });
+  const [temperature, setTemperature] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const v = window.localStorage.getItem('mirabilis-temperature');
+      return v === null ? null : Number(v);
+    }
+    return null;
+  });
+  const [maxTokens, setMaxTokens] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const v = window.localStorage.getItem('mirabilis-max-tokens');
+      return v === null ? null : Number(v);
+    }
+    return null;
+  });
   const [mcpServers, setMcpServers] = useState([]);
   const [mcpSelectedServerId, setMcpSelectedServerId] = useState('');
   const [mcpForm, setMcpForm] = useState({
@@ -560,6 +877,8 @@ export default function ChatApp() {
       if (synth) {
         synth.onvoiceschanged = null;
         synth.cancel();
+        setIsSpeaking(false);
+        setSpeakingMessageId(null);
       }
     };
   }, [selectedVoiceUri]);
@@ -650,6 +969,20 @@ export default function ChatApp() {
   useEffect(() => {
     window.localStorage.setItem('mirabilis-piper-model', selectedPiperModelId || '');
   }, [selectedPiperModelId]);
+
+  useEffect(() => {
+    window.localStorage.setItem('mirabilis-pinned-chats', JSON.stringify(Array.from(pinnedChatIds)));
+  }, [pinnedChatIds]);
+
+  useEffect(() => {
+    if (temperature === null) window.localStorage.removeItem('mirabilis-temperature');
+    else window.localStorage.setItem('mirabilis-temperature', String(temperature));
+  }, [temperature]);
+
+  useEffect(() => {
+    if (maxTokens === null) window.localStorage.removeItem('mirabilis-max-tokens');
+    else window.localStorage.setItem('mirabilis-max-tokens', String(maxTokens));
+  }, [maxTokens]);
 
   async function fetchPiperModels() {
     try {
@@ -761,6 +1094,12 @@ export default function ChatApp() {
   async function speakTextViaPiper(text, messageId = null) {
     const clean = plainTextForSpeech(text);
     if (!clean) return;
+    // Stop any currently-playing piper audio before starting a new one
+    if (piperAudioRef.current) {
+      piperAudioRef.current.pause();
+      piperAudioRef.current.src = '';
+      piperAudioRef.current = null;
+    }
     setSpeakingMessageId(messageId);
     setIsSpeaking(true);
     try {
@@ -1360,6 +1699,7 @@ export default function ChatApp() {
       method: 'POST',
       body: JSON.stringify({ title: 'New Chat', uncensoredMode })
     });
+    setChatSearch('');
     await refreshChats();
     await loadChat(payload.chat.id);
   }
@@ -1449,6 +1789,8 @@ export default function ChatApp() {
   }
 
   async function removeChat(chatId) {
+    // Abort any in-flight stream so the post-stream saveChat doesn't resurrect the chat
+    if (activeChatId === chatId) stopStreaming();
     await api(`/api/chats/${chatId}`, { method: 'DELETE' });
     setOpenChatMenuId((current) => (current === chatId ? null : current));
     if (activeChatId === chatId) {
@@ -1459,6 +1801,9 @@ export default function ChatApp() {
   }
 
   async function clearAllChats() {
+    // Abort stream first — otherwise the post-stream saveChat fires after the
+    // DELETE and immediately re-adds the last chat (intermittent "comes back" bug)
+    stopStreaming();
     await api('/api/chats', { method: 'DELETE' });
     setActiveChatId(null);
     setMessages([]);
@@ -1479,23 +1824,67 @@ export default function ChatApp() {
     await removeChat(targetId);
   }
 
+  async function renameChat(chatId, newTitle) {
+    try {
+      await api(`/api/chats/${chatId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: newTitle }),
+      });
+      setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, title: newTitle } : c));
+    } catch (err) {
+      setStatusText(`Rename failed: ${err.message}`);
+    }
+  }
+
+  function togglePin(chatId) {
+    setPinnedChatIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(chatId)) next.delete(chatId);
+      else next.add(chatId);
+      return next;
+    });
+  }
+
+  async function exportChat(chatId) {
+    try {
+      const payload = await api(`/api/chats/${chatId}`);
+      const chat = payload.chat;
+      const lines = [`# ${chat.title}\n`];
+      for (const msg of chat.messages || []) {
+        const role = msg.role === 'user' ? 'You' : 'Assistant';
+        const time = msg.createdAt ? new Date(msg.createdAt).toLocaleString() : '';
+        lines.push(`## ${role}${time ? ` — ${time}` : ''}\n`);
+        lines.push(`${msg.content || ''}\n`);
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(chat.title || 'chat').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '')}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setStatusText(`Export failed: ${err.message}`);
+    }
+  }
+
   async function checkImageService() {
     try {
       const payload = await api('/api/image-service/status');
-      setImageServiceAvailable(payload.available === true);
-      if (payload.available) {
-        // Translate device id to human label
+      const available = payload.available === true;
+      setImageServiceAvailable((prev) => prev === available ? prev : available);
+      if (available) {
         const dev = payload.device || '';
-        if (dev === 'mps') setImageServiceDevice('MPS');
-        else if (dev.startsWith('cuda')) setImageServiceDevice('NVIDIA');
-        else if (dev === 'cpu') setImageServiceDevice('CPU');
-        else setImageServiceDevice(dev || 'GPU');
+        const label = dev === 'mps' ? 'MPS' : dev.startsWith('cuda') ? 'NVIDIA' : dev === 'cpu' ? 'CPU' : (dev || 'GPU');
+        setImageServiceDevice((prev) => prev === label ? prev : label);
       } else {
-        setImageServiceDevice(null);
+        setImageServiceDevice((prev) => prev === null ? prev : null);
       }
     } catch {
-      setImageServiceAvailable(false);
-      setImageServiceDevice(null);
+      setImageServiceAvailable((prev) => prev === false ? prev : false);
+      setImageServiceDevice((prev) => prev === null ? prev : null);
     }
   }
 
@@ -1741,18 +2130,18 @@ export default function ChatApp() {
       setIsTrainingMenuOpen(false);
       setIsToolsMenuOpen(false);
       setIsVoiceMenuOpen(false);
-      setIsOpenClawInfoOpen(false);
       setIsContextPanelOpen(false);
       setIsEngineMenuOpen(false);
       setOpenHardwarePopover(null);
       setIsControlPanelOpen(false);
       setIsMcpPanelOpen(false);
+      setIsParamsPanelOpen(false);
       setOpenChatMenuId(null);
     }
 
     const anyDropdownOpen = isProviderMenuOpen || isProviderConfigOpen || isModelMenuOpen || isTrainingMenuOpen || isToolsMenuOpen ||
-      isVoiceMenuOpen || isOpenClawInfoOpen || isContextPanelOpen || isEngineMenuOpen ||
-      openHardwarePopover !== null || isControlPanelOpen || isMcpPanelOpen;
+      isVoiceMenuOpen || isContextPanelOpen || isEngineMenuOpen ||
+      openHardwarePopover !== null || isControlPanelOpen || isMcpPanelOpen || isParamsPanelOpen;
 
     const activeMenuKey = isProviderMenuOpen
       ? 'provider'
@@ -1764,8 +2153,6 @@ export default function ChatApp() {
       ? 'tools'
       : isVoiceMenuOpen
       ? 'voice'
-      : isOpenClawInfoOpen
-      ? 'openclaw'
       : isContextPanelOpen
       ? 'context'
       : isEngineMenuOpen
@@ -1776,6 +2163,8 @@ export default function ChatApp() {
       ? 'control'
       : isMcpPanelOpen
       ? 'mcp'
+      : isParamsPanelOpen
+      ? 'params'
       : null;
 
     function getFocusableElements(container) {
@@ -1862,6 +2251,25 @@ export default function ChatApp() {
       };
     }, [activeMenuKey, anyDropdownOpen]);
 
+  // Close chat item three-dot menu when clicking outside that specific item
+  useEffect(() => {
+    if (!openChatMenuId) return undefined;
+    function handlePointerDown(e) {
+      if (!e.target.closest(`[data-chat-item="${openChatMenuId}"]`)) {
+        setOpenChatMenuId(null);
+      }
+    }
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') setOpenChatMenuId(null);
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openChatMenuId]);
+
   useEffect(() => {
     refreshChats().catch(() => setStatusText('Failed to load chats'));
   }, []);
@@ -1872,17 +2280,41 @@ export default function ChatApp() {
     checkVoiceTools();
     refreshTrainingStats();
     checkRemoteStatus();
-    // Poll every 30 s so hardware and image device chips stay current.
+
+    async function fetchUtilization() {
+      try {
+        const data = await api('/api/system/utilization');
+        setUtilization({ cpuPct: data.cpuPct ?? 0, memPct: data.memPct ?? 0 });
+      } catch { /* non-critical */ }
+    }
+
+    fetchUtilization();
+    // Poll every 30 s so image device chip stays current.
+    // Hardware profile is cached server-side after first call — no need to re-poll.
     const interval = setInterval(() => {
       checkImageService();
-      checkHardwareProfile();
     }, 30000);
-    return () => clearInterval(interval);
+    // Poll utilization every 15 s (backend caches at 3 s, so no benefit polling faster)
+    const utilInterval = setInterval(fetchUtilization, 15000);
+    return () => { clearInterval(interval); clearInterval(utilInterval); };
   }, []);
 
   useEffect(() => {
     refreshModels();
   }, [provider]);
+
+  // Global keyboard shortcuts: Ctrl+K / Cmd+K → new chat
+  useEffect(() => {
+    function handleShortcuts(e) {
+      const ctrlOrCmd = e.metaKey || e.ctrlKey;
+      if (ctrlOrCmd && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        shortcutRef.current.createChat?.();
+      }
+    }
+    document.addEventListener('keydown', handleShortcuts);
+    return () => document.removeEventListener('keydown', handleShortcuts);
+  }, []);
 
   useEffect(() => {
     if (!isMcpPanelOpen) return;
@@ -1910,59 +2342,67 @@ export default function ChatApp() {
     window.localStorage.setItem('mirabilis-engine-option', selectedEngine);
   }, [selectedEngine]);
 
-  // Auto-scroll to bottom while streaming new tokens
+  // Auto-scroll to bottom while streaming new tokens — throttled to one rAF per frame
+  // so rapid token bursts don't trigger a layout read/write on every setState cycle.
   useEffect(() => {
     if (!isStreaming || !autoScrollEnabled || !messagesScrollRef.current) return;
     const el = messagesScrollRef.current;
-    el.scrollTop = el.scrollHeight;
+    const raf = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    return () => cancelAnimationFrame(raf);
   }, [messages, isStreaming, autoScrollEnabled]);
 
-  const chatTokenSummary = useMemo(() => {
-    return messages.reduce(
-      (summary, message) => {
-        const tokenCount = Number(message.tokenEstimate || 0);
-        if (message.role === 'user') {
-          summary.input += tokenCount;
-        }
-        if (message.role === 'assistant') {
-          summary.output += tokenCount;
-        }
-        return summary;
-      },
-      { input: 0, output: 0 }
-    );
-  }, [messages]);
+  // systemPrompt tokens isolated so typing in messages never re-runs estimateTokens(systemPrompt)
+  const systemPromptTokens = useMemo(() => estimateTokens(systemPrompt), [systemPrompt]);
 
-  const contextUsage = useMemo(() => {
-    const systemTokens = estimateTokens(systemPrompt);
+  // Pinned-first, search-filtered chat list for the sidebar
+  const sortedAndFilteredChats = useMemo(() => {
+    const lc = chatSearch.trim().toLowerCase();
+    const filtered = lc ? chats.filter((c) => (c.title || '').toLowerCase().includes(lc)) : chats;
+    const pinned = filtered.filter((c) => pinnedChatIds.has(c.id));
+    const unpinned = filtered.filter((c) => !pinnedChatIds.has(c.id));
+    return [...pinned, ...unpinned];
+  }, [chats, chatSearch, pinnedChatIds]);
+
+  // Single-pass over messages for all token accounting (was two separate useMemo loops)
+  const { chatTokenSummary, contextUsage } = useMemo(() => {
+    let inputTokens = 0;
+    let outputTokens = 0;
     let userTokens = 0;
     let uncategorizedTokens = 0;
 
     for (const message of messages) {
       const tokenCount = Number(message.tokenEstimate || 0);
-      if (message.role === 'user') userTokens += tokenCount;
-      else uncategorizedTokens += tokenCount;
+      if (message.role === 'user') {
+        inputTokens += tokenCount;
+        userTokens += tokenCount;
+      } else {
+        outputTokens += tokenCount;
+        uncategorizedTokens += tokenCount;
+      }
     }
 
-    const totalTokens = systemTokens + userTokens + uncategorizedTokens;
+    const totalTokens = systemPromptTokens + userTokens + uncategorizedTokens;
     const windowTokens = estimateModelContextWindow(model);
     const usedPct = Math.min(999, Math.round((totalTokens / Math.max(windowTokens, 1)) * 100));
-    const systemPct = totalTokens > 0 ? Math.round((systemTokens / totalTokens) * 100) : 0;
+    const systemPct = totalTokens > 0 ? Math.round((systemPromptTokens / totalTokens) * 100) : 0;
     const userPct = totalTokens > 0 ? Math.round((userTokens / totalTokens) * 100) : 0;
     const uncategorizedPct = Math.max(0, 100 - systemPct - userPct);
 
     return {
-      systemTokens,
-      userTokens,
-      uncategorizedTokens,
-      totalTokens,
-      windowTokens,
-      usedPct,
-      systemPct,
-      userPct,
-      uncategorizedPct
+      chatTokenSummary: { input: inputTokens, output: outputTokens },
+      contextUsage: {
+        systemTokens: systemPromptTokens,
+        userTokens,
+        uncategorizedTokens,
+        totalTokens,
+        windowTokens,
+        usedPct,
+        systemPct,
+        userPct,
+        uncategorizedPct
+      }
     };
-  }, [messages, model, systemPrompt]);
+  }, [messages, model, systemPromptTokens]);
 
   async function handleImageGeneration(content) {
     setInput('');
@@ -2090,6 +2530,13 @@ export default function ChatApp() {
     const chat = await api(`/api/chats/${activeChatId}`);
     const serverMessages = chat.chat?.messages || [];
     const serverUserIdx = serverMessages.map((m) => m.id).lastIndexOf(lastUserMsg.id);
+    if (serverUserIdx < 0) {
+      // Temp ID not on server (e.g. message from a failed/aborted stream) — don't patch
+      setMessages(messages.slice(0, messages.lastIndexOf(lastUserMsg) + 1));
+      setInput(lastUserMsg.content);
+      setTimeout(() => sendMessageWithContent(lastUserMsg.content), 0);
+      return;
+    }
     await api(`/api/chats/${activeChatId}`, {
       method: 'PATCH',
       body: JSON.stringify({ messages: serverMessages.slice(0, serverUserIdx + 1) })
@@ -2230,7 +2677,9 @@ export default function ChatApp() {
           trainingMode,
           usePersonalMemory: outboundUsePersonalMemory,
           providerBaseUrl: resolvedProvider.providerBaseUrl,
-          providerApiKey: resolvedProvider.providerApiKey
+          providerApiKey: resolvedProvider.providerApiKey,
+          ...(temperature !== null && isFinite(temperature) ? { temperature } : {}),
+          ...(maxTokens !== null && isFinite(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
         }),
         signal: ctrl.signal
       });
@@ -2321,15 +2770,22 @@ export default function ChatApp() {
           }
 
           if (event === 'titleUpdate' && payload.chatId && payload.title) {
-            setChats((prev) =>
-              prev.map((c) => c.id === payload.chatId ? { ...c, title: payload.title } : c)
-            );
+            setChats((prev) => {
+              const match = prev.find((c) => c.id === payload.chatId);
+              if (!match || match.title === payload.title) return prev; // no-op if unchanged
+              return prev.map((c) => c.id === payload.chatId ? { ...c, title: payload.title } : c);
+            });
           }
         }
       }
 
-      await refreshChats();
-      await loadChat(chatId);
+      // refreshChats() intentionally removed from the stream success path.
+      // New chats are already in the sidebar (added before streaming started).
+      // Titles are updated via the 'titleUpdate' SSE event during the stream.
+      // Calling refreshChats() here was the second failure path for the
+      // "clear all → chats come back" bug: if the stream finished just after
+      // clearAllChats(), this call would return the backend-saved chat and
+      // overwrite the just-emptied chats list.
       if (trainingMode === 'fine-tuning') {
         await refreshTrainingStats();
       }
@@ -2362,6 +2818,9 @@ export default function ChatApp() {
       setIsStreaming(false);
     }
   }
+
+  // Always keep shortcut ref in sync with latest createChat (avoids stale closure in keydown handler)
+  shortcutRef.current.createChat = createChat;
 
   return (
     <main className="relative h-screen w-screen p-3 sm:p-6">
@@ -2414,9 +2873,10 @@ export default function ChatApp() {
             </button>
           </div>
 
+          {isSystemPromptVisible && (
           <div className="space-y-2">
             <label className="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-300">
-              System Prompt
+              Instructions
             </label>
             <textarea
               value={systemPrompt}
@@ -2425,58 +2885,41 @@ export default function ChatApp() {
               className="w-full rounded-lg border border-black/10 bg-white/80 px-2 py-2 text-xs dark:border-white/20 dark:bg-slate-800"
             />
           </div>
+          )}
 
-          <div className="mt-2 flex-1 overflow-y-auto scroll-thin pr-1">
+          <div className="mb-2 mt-2">
+            <input
+              type="text"
+              autoComplete="off"
+              placeholder="Search chats…"
+              value={chatSearch}
+              onChange={(e) => setChatSearch(e.target.value)}
+              className="w-full rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-xs outline-none placeholder:text-slate-400 focus:border-accent dark:border-white/20 dark:bg-slate-900/60 dark:placeholder:text-slate-500"
+            />
+          </div>
+
+          <div className="flex-1 overflow-y-auto scroll-thin pr-1">
             <ul className="space-y-2">
-              {chats.map((chat) => (
-                <li key={chat.id}>
-                  <div
-                    className={`group relative flex items-start gap-2 rounded-xl border px-2 py-2 transition ${
-                      chat.id === activeChatId
-                        ? 'border-accent bg-accentSoft/80 dark:bg-accent/20'
-                        : 'border-black/10 bg-white/75 hover:bg-white dark:border-white/10 dark:bg-slate-800/60 dark:hover:bg-slate-700/60'
-                    }`}
-                  >
-                    <button onClick={() => loadChat(chat.id)} className="min-w-0 flex-1 text-left">
-                      <div className="line-clamp-1 text-sm font-medium">{chat.title}</div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-300">{formatTime(chat.updatedAt)}</div>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`More actions for ${chat.title}`}
-                      title="Chat actions"
-                      className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 opacity-0 transition hover:bg-black/5 hover:text-slate-700 group-hover:opacity-100 focus:opacity-100 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-200"
-                      onClick={() => setOpenChatMenuId((current) => (current === chat.id ? null : chat.id))}
-                    >
-                      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="currentColor">
-                        <circle cx="5" cy="12" r="1.8" />
-                        <circle cx="12" cy="12" r="1.8" />
-                        <circle cx="19" cy="12" r="1.8" />
-                      </svg>
-                    </button>
-
-                    {openChatMenuId === chat.id && (
-                      <div className="absolute right-2 top-10 z-10 min-w-28 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
-                          onClick={() => removeChat(chat.id)}
-                        >
-                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M3 6h18" />
-                            <path d="M8 6V4.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3V6" />
-                            <path d="M6.5 6l1 12.2c.1.8.7 1.3 1.5 1.3h6c.8 0 1.4-.5 1.5-1.3L17.5 6" />
-                            <path d="M10 10.2v5.6" />
-                            <path d="M14 10.2v5.6" />
-                          </svg>
-                          <span>Delete</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </li>
+              {sortedAndFilteredChats.map((chat) => (
+                <ChatItem
+                  key={chat.id}
+                  chat={chat}
+                  isActive={chat.id === activeChatId}
+                  isMenuOpen={openChatMenuId === chat.id}
+                  isPinned={pinnedChatIds.has(chat.id)}
+                  onSelect={loadChat}
+                  onToggleMenu={(id) => setOpenChatMenuId((current) => (current === id ? null : id))}
+                  onDelete={removeChat}
+                  onRename={renameChat}
+                  onExport={exportChat}
+                  onTogglePin={togglePin}
+                />
               ))}
-              {chats.length === 0 && <li className="rounded-lg border border-dashed border-black/20 p-3 text-xs text-slate-500">No chats yet.</li>}
+              {sortedAndFilteredChats.length === 0 && (
+                <li className="rounded-lg border border-dashed border-black/20 p-3 text-xs text-slate-500">
+                  {chatSearch.trim() ? 'No chats match your search.' : 'No chats yet.'}
+                </li>
+              )}
             </ul>
           </div>
 
@@ -2553,70 +2996,26 @@ export default function ChatApp() {
             </div>
           )}
           <header className="mb-3 border-b border-black/10 pb-3 dark:border-white/10">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-mono text-xs text-slate-500 dark:text-slate-300">{statusText}</p>
-                <p className="mt-1 font-mono text-[11px] text-slate-500 dark:text-slate-300">
-                  Est. input {formatTokenCount(chatTokenSummary.input)} · Est. output {formatTokenCount(chatTokenSummary.output)}
-                </p>
-              </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300">{statusText}</p>
+              <p className="truncate font-mono text-[11px] text-slate-400 dark:text-slate-400">
+                Est. input {formatTokenCount(chatTokenSummary.input)} · Est. output {formatTokenCount(chatTokenSummary.output)}
+              </p>
+            </div>
 
-              <div className="flex shrink-0 flex-wrap items-start gap-1.5 justify-end max-w-[55%]">
-                <div data-menu-container="true" className="relative order-1">
-                  <button
-                    type="button"
-                    data-menu-trigger="context"
-                    onClick={() => {
-                      setIsEngineMenuOpen(false);
-                      setOpenHardwarePopover(null);
-                      setIsVoiceMenuOpen(false);
-                      setIsContextPanelOpen((prev) => !prev);
-                    }}
-                    className="inline-flex items-center justify-center rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
-                    title={`Estimated context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
-                  >
-                    Context {contextUsage.usedPct}%
-                  </button>
+            <div className="mt-1.5 flex flex-nowrap items-center gap-1.5">
 
-                  {isContextPanelOpen && (
-                    <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Token Limit</span>
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Est. {contextUsage.usedPct}% used</span>
-                      </div>
-
-                      <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-                        <div
-                          className="h-full rounded-full bg-accent transition-all duration-300"
-                          style={{ width: `${Math.min(contextUsage.usedPct, 100)}%` }}
-                        />
-                      </div>
-
-                      <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                        <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
-                          <span>System instructions</span>
-                          <span>{contextUsage.systemPct}% · {contextUsage.systemTokens.toLocaleString()} tok</span>
-                        </div>
-                        <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
-                          <span>User content</span>
-                          <span>{contextUsage.userPct}% · {contextUsage.userTokens.toLocaleString()} tok</span>
-                        </div>
-                        <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
-                          <span>Assistant</span>
-                          <span>{contextUsage.uncategorizedPct}% · {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
-                        {contextUsage.totalTokens.toLocaleString()} / {contextUsage.windowTokens.toLocaleString()} tokens
-                      </div>
-                    </div>
-                  )}
-                </div>
-
+                {/* hardware chips — left */}
                 {['logic', 'memory', 'compute', 'npu'].map((key) => {
                   const item = hardwareProfile[key];
                   if (!item?.label) return null;
+                  const isActive = isStreaming && (key === 'compute' || key === 'npu');
+                  const fillPct = key === 'logic' ? utilization.cpuPct : key === 'memory' ? utilization.memPct : 0;
+                  const fillColor = fillPct >= 80
+                    ? 'bg-red-400/25 dark:bg-red-500/20'
+                    : fillPct >= 60
+                    ? 'bg-amber-400/25 dark:bg-amber-500/20'
+                    : 'bg-green-400/20 dark:bg-green-500/15';
                   return (
                     <div key={key} data-menu-container="true" className="relative">
                       <button
@@ -2628,13 +3027,27 @@ export default function ChatApp() {
                           setIsVoiceMenuOpen(false);
                           setOpenHardwarePopover((current) => (current === key ? null : key));
                         }}
-                        className="rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
+                        className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                          isActive
+                            ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
+                            : 'border-black/10 bg-white/80 text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300'
+                        }`}
                         title={item.expanded || item.label}
                       >
-                        {item.label}
+                        {fillPct > 0 && !isActive && (
+                          <span
+                            aria-hidden="true"
+                            className={`pointer-events-none absolute inset-y-0 left-0 rounded-full transition-all duration-700 ${fillColor}`}
+                            style={{ width: `${fillPct}%` }}
+                          />
+                        )}
+                        <span className="relative">{item.label}</span>
+                        {isActive && (
+                          <span className="relative inline-block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse dark:bg-green-500" aria-hidden="true" />
+                        )}
                       </button>
                       {openHardwarePopover === key && item.expanded ? (
-                        <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 text-[11px] text-slate-600 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95 dark:text-slate-300">
+                        <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 text-[11px] text-slate-600 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95 dark:text-slate-300">
                           {item.expanded.split('\n').map((line, i) => (
                             <div key={i} className={i === 0 ? 'font-semibold text-slate-800 dark:text-slate-100 mb-1' : 'text-slate-500 dark:text-slate-400'}>{line}</div>
                           ))}
@@ -2644,52 +3057,123 @@ export default function ChatApp() {
                   );
                 })}
 
-                {hardwareProfile.action?.label ? (
-                  <div data-menu-container="true" className="relative order-6">
+                {/* context + engine — right */}
+                <div className="ml-auto flex flex-nowrap items-center gap-1.5">
+                  <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsSystemPromptVisible((v) => !v)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition ${
+                      isSystemPromptVisible
+                        ? 'border-accent/60 bg-accentSoft text-ink dark:border-accent/40 dark:bg-accent/20 dark:text-green-300'
+                        : 'border-black/10 bg-white/80 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10'
+                    }`}
+                    title="Toggle instructions visibility"
+                  >
+                    <span>Instructions</span>
+                    <span className={`inline-block h-1.5 w-1.5 rounded-full transition-colors ${
+                      isSystemPromptVisible ? 'bg-accent dark:bg-green-400' : 'bg-slate-400 dark:bg-slate-500'
+                    }`} aria-hidden="true" />
+                  </button>
+                  </div>
+                  <div data-menu-container="true" className="relative">
                     <button
                       type="button"
-                      data-menu-trigger="engine"
+                      data-menu-trigger="context"
                       onClick={() => {
-                        setIsContextPanelOpen(false);
-                        setIsVoiceMenuOpen(false);
+                        setIsEngineMenuOpen(false);
                         setOpenHardwarePopover(null);
-                        setIsEngineMenuOpen((current) => !current);
+                        setIsVoiceMenuOpen(false);
+                        setIsContextPanelOpen((prev) => !prev);
                       }}
-                      className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
-                      title={selectedEngine ? `Engine: ${selectedEngine}` : 'Engine'}
+                      className="inline-flex items-center justify-center rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
+                      title={`Estimated context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
                     >
-                      <span>Engine</span>
-                      <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
-                        <path d="M5.25 7.5L10 12.25 14.75 7.5" />
-                      </svg>
+                      Context {contextUsage.usedPct}%
                     </button>
-                    {isEngineMenuOpen && Array.isArray(hardwareProfile.action.options) && hardwareProfile.action.options.length > 0 ? (
-                      <div data-menu-panel="engine" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 min-w-36 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
-                        {hardwareProfile.action.options.map((option) => (
-                          <button
-                            key={option}
-                            type="button"
-                            onClick={() => {
-                              setSelectedEngine(option);
-                              setStatusText(`Engine: ${option}`);
-                              setIsEngineMenuOpen(false);
-                              checkHardwareProfile();
-                            }}
-                            className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                              selectedEngine === option
-                                ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
-                                : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
-                            }`}
-                          >
-                            <span>{option}</span>
-                            {selectedEngine === option ? <span className="text-[10px] opacity-70">active</span> : null}
-                          </button>
-                        ))}
+
+                    {isContextPanelOpen && (
+                      <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Token Limit</span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400">Est. {contextUsage.usedPct}% used</span>
+                        </div>
+
+                        <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                          <div
+                            className="h-full rounded-full bg-accent transition-all duration-300"
+                            style={{ width: `${Math.min(contextUsage.usedPct, 100)}%` }}
+                          />
+                        </div>
+
+                        <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                          <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
+                            <span>System instructions</span>
+                            <span>{contextUsage.systemPct}% · {contextUsage.systemTokens.toLocaleString()} tok</span>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
+                            <span>User content</span>
+                            <span>{contextUsage.userPct}% · {contextUsage.userTokens.toLocaleString()} tok</span>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
+                            <span>Assistant</span>
+                            <span>{contextUsage.uncategorizedPct}% · {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
+                          {contextUsage.totalTokens.toLocaleString()} / {contextUsage.windowTokens.toLocaleString()} tokens
+                        </div>
                       </div>
-                    ) : null}
+                    )}
                   </div>
-                ) : null}
-              </div>
+
+                  {hardwareProfile.action?.label ? (
+                    <div data-menu-container="true" className="relative">
+                      <button
+                        type="button"
+                        data-menu-trigger="engine"
+                        onClick={() => {
+                          setIsContextPanelOpen(false);
+                          setIsVoiceMenuOpen(false);
+                          setOpenHardwarePopover(null);
+                          setIsEngineMenuOpen((current) => !current);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
+                        title={selectedEngine ? `Engine: ${selectedEngine}` : 'Engine'}
+                      >
+                        <span>Engine</span>
+                        <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+                          <path d="M5.25 7.5L10 12.25 14.75 7.5" />
+                        </svg>
+                      </button>
+                      {isEngineMenuOpen && Array.isArray(hardwareProfile.action.options) && hardwareProfile.action.options.length > 0 ? (
+                        <div data-menu-panel="engine" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 min-w-36 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                          {hardwareProfile.action.options.map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => {
+                                setSelectedEngine(option);
+                                setStatusText(`Engine: ${option}`);
+                                setIsEngineMenuOpen(false);
+                                checkHardwareProfile();
+                              }}
+                              className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
+                                selectedEngine === option
+                                  ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                                  : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                              }`}
+                            >
+                              <span>{option}</span>
+                              {selectedEngine === option ? <span className="text-[10px] opacity-70">active</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
             </div>
           </header>
 
@@ -2767,125 +3251,25 @@ export default function ChatApp() {
               </div>
             )}
 
-            {messages.map((message, idx) => {
-              const isLastAssistant =
-                message.role === 'assistant' &&
-                !message.imageGenerating &&
-                idx === messages.length - 1;
-              return (
-              <article
+            {messages.map((message, idx) => (
+              <MessageRow
                 key={message.id}
-                className={`fade-in max-w-[90%] rounded-2xl px-3 py-2 text-sm shadow-sm sm:max-w-[75%] ${
-                  message.role === 'user'
-                    ? 'ml-auto bg-accent text-white shadow-[0_10px_22px_-14px_rgba(26,168,111,0.9)]'
-                    : speakingMessageId === message.id
-                    ? 'border border-accent/50 bg-accentSoft/35 text-slate-800 shadow-[0_0_0_1px_rgba(26,168,111,0.15)] dark:border-accent/60 dark:bg-accent/10 dark:text-slate-100'
-                    : 'border border-black/10 bg-white text-slate-800 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100'
-                }`}
-              >
-                <div className="mb-1 flex items-center justify-between gap-3 text-[10px] uppercase opacity-70">
-                  <span>{message.role}</span>
-                  <span className="font-mono normal-case opacity-80">
-                    Est. {formatTokenCount(message.tokenEstimate || 0)}
-                  </span>
-                </div>
-                {isStreaming && !message.content && message.role === 'assistant' && idx === messages.length - 1
-                  ? (
-                    <div className="flex items-center gap-1.5 py-1">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
-                    </div>
-                  )
-                  : renderMessageContent(message.content, message, { remoteConnectedRef, remoteTargetRef, execResultsRef, onRunCommand: runCommand })}
-                {Array.isArray(message.attachments) && message.attachments.length > 0 && (
-                  <div className="mt-2 grid gap-2">
-                    {message.attachments.map((file) => {
-                      const isImage = String(file.mimeType || '').startsWith('image/');
-                      return (
-                        <div key={file.storedName || file.url} className="rounded-xl border border-black/10 bg-white/80 p-2 dark:border-white/10 dark:bg-slate-900/50">
-                          {isImage && file.url ? (
-                            <img
-                              src={`${API_BASE}${file.url}`}
-                              alt={file.name || 'Uploaded image'}
-                              className="mb-2 max-h-52 rounded-lg object-contain"
-                            />
-                          ) : null}
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="truncate text-xs font-medium">{file.name || 'file'}</div>
-                              <div className="text-[10px] opacity-70">{file.mimeType || 'application/octet-stream'} · {formatFileSize(file.size)}</div>
-                            </div>
-                            {file.url ? (
-                              <a
-                                href={`${API_BASE}${file.url}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="rounded-md border border-black/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
-                              >
-                                Open
-                              </a>
-                            ) : null}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {message.role === 'assistant' && message.usage?.isEstimate && (
-                  <div className="mt-2 font-mono text-[10px] opacity-60">
-                    Est. context {formatTokenCount(message.usage.promptTokens)} · Est. total {formatTokenCount(message.usage.totalTokens)}
-                  </div>
-                )}
-                {message.role === 'assistant' && !message.imageGenerating && (
-                  <div className="mt-2 flex justify-end gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (speakingMessageId === message.id && isSpeaking) stopSpeaking();
-                        else speakText(message.content || '', message.id);
-                      }}
-                      disabled={(voiceEngine === 'browser' && !voiceSupported) || !String(message.content || '').trim()}
-                      title={speakingMessageId === message.id && isSpeaking ? 'Stop speaking' : 'Speak response'}
-                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition disabled:opacity-40 ${
-                        speakingMessageId === message.id && isSpeaking
-                          ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                          : 'text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M4 12h1" />
-                        <path d="M8 9v6" />
-                        <path d="M12 7v10" />
-                        <path d="M16 9v6" />
-                        <path d="M20 11v2" />
-                      </svg>
-                      {speakingMessageId === message.id && isSpeaking ? 'Stop' : 'Speak'}
-                    </button>
-
-                    {isLastAssistant && (
-                      <button
-                        onClick={regenerate}
-                        disabled={isStreaming}
-                        title="Regenerate response"
-                        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-400 transition hover:bg-black/5 hover:text-slate-700 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
-                      >
-                        <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M4 4a8 8 0 0 1 12 0" />
-                          <path d="M16 16a8 8 0 0 1-12 0" />
-                          <polyline points="13 1 16 4 13 7" />
-                          <polyline points="7 19 4 16 7 13" />
-                        </svg>
-                        Regenerate
-                      </button>
-                    )}
-
-                    <CopyMessageButton text={message.content || ''} />
-                  </div>
-                )}
-              </article>
-              );
-            })}
+                message={message}
+                isLast={idx === messages.length - 1}
+                isStreaming={isStreaming}
+                speakingMessageId={speakingMessageId}
+                isSpeaking={isSpeaking}
+                voiceEngine={voiceEngine}
+                voiceSupported={voiceSupported}
+                remoteConnectedRef={remoteConnectedRef}
+                remoteTargetRef={remoteTargetRef}
+                execResultsRef={execResultsRef}
+                runCommand={runCommand}
+                stopSpeaking={stopSpeaking}
+                speakText={speakText}
+                regenerate={regenerate}
+              />
+            ))}
           </div>
 
           {isTeachPanelOpen && (
@@ -3203,7 +3587,48 @@ export default function ChatApp() {
                       ) : (
                         <div className="px-2 py-2 text-xs text-slate-500">No models found</div>
                       )}
+
+                    {/* Generation params at bottom of model menu */}
+                    <div className="mt-1 border-t border-black/10 px-2 py-2 dark:border-white/10">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Generation</div>
+                      <div className="mb-1.5">
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                          <span>Temperature</span>
+                          <span>{temperature == null ? 'default' : temperature.toFixed(2)}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="2"
+                          step="0.05"
+                          value={temperature ?? 0.7}
+                          onChange={(e) => setTemperature(Number(e.target.value))}
+                          className="mt-0.5 w-full accent-[var(--color-accent)]"
+                        />
+                        {temperature !== null && (
+                          <button
+                            type="button"
+                            onClick={() => setTemperature(null)}
+                            className="text-[9px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                          >
+                            Reset to default
+                          </button>
+                        )}
+                      </div>
+                      <div>
+                        <div className="mb-0.5 text-[10px] text-slate-500 dark:text-slate-400">Max tokens</div>
+                        <input
+                          type="number"
+                          min="1"
+                          max="131072"
+                          placeholder="provider default"
+                          value={maxTokens ?? ''}
+                          onChange={(e) => setMaxTokens(e.target.value === '' ? null : Math.max(1, Number(e.target.value)))}
+                          className="w-full rounded border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                        />
+                      </div>
                     </div>
+                  </div>
                   )}
                 </div>
                 )}
@@ -3403,7 +3828,7 @@ export default function ChatApp() {
                 </div>
 
                 {/* ── Remote Control button ───────────────────────── */}
-                <div data-menu-container="true" className="relative order-5">
+                <div data-menu-container="true" className="relative order-3">
                   <button
                     type="button"
                     data-menu-trigger="control"
@@ -3519,7 +3944,7 @@ export default function ChatApp() {
                   )}
                 </div>
 
-                <div className="relative order-2">
+                <div className="relative">
                   <button
                     type="button"
                     onClick={toggleUncensoredMode}
@@ -3535,7 +3960,7 @@ export default function ChatApp() {
                   </button>
                 </div>
 
-                <div data-menu-container="true" className="relative order-3 flex items-center gap-1">
+                <div className="group relative order-5">
                   <button
                     type="button"
                     onClick={toggleOpenClawMode}
@@ -3549,38 +3974,16 @@ export default function ChatApp() {
                     <span className={`h-2 w-2 rounded-full ${openClawMode ? 'bg-rose-400 shadow-[0_0_6px_2px_rgba(244,63,94,0.5)]' : 'bg-transparent border border-slate-400/40'}`} />
                     OpenClaw
                   </button>
-                  <button
-                    type="button"
-                    data-menu-trigger="openclaw"
-                    onClick={() => {
-                      setIsContextPanelOpen(false);
-                      setIsModelMenuOpen(false);
-                      setIsTrainingMenuOpen(false);
-                      setIsToolsMenuOpen(false);
-                      setIsVoiceMenuOpen(false);
-                      setOpenHardwarePopover(null);
-                      setIsEngineMenuOpen(false);
-                      setIsControlPanelOpen(false);
-                      setIsMcpPanelOpen(false);
-                      setIsOpenClawInfoOpen((prev) => !prev);
-                    }}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-black/10 bg-white/80 text-[11px] font-semibold text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
-                    title="OpenClaw details"
-                    aria-label="OpenClaw details"
-                  >
-                    i
-                  </button>
-                  {isOpenClawInfoOpen && (
-                    <div data-menu-panel="openclaw" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 w-80 rounded-xl border border-black/10 bg-white/95 p-3 text-[11px] text-slate-600 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95 dark:text-slate-300">
-                      <div className="mb-1.5 text-[11px] font-semibold text-slate-800 dark:text-slate-100">OpenClaw Profile</div>
-                      <ul className="space-y-1 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
-                        <li>Turns on Uncensored mode.</li>
-                        <li>Disables Personal Memory injection.</li>
-                        <li>Clears the app System Prompt field.</li>
-                        <li>Leaves model-level behavior untouched.</li>
-                      </ul>
-                    </div>
-                  )}
+                  {/* Hover tooltip — no button/state needed */}
+                  <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl border border-black/10 bg-white/95 p-3 text-[11px] text-slate-600 opacity-0 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur transition-all duration-150 group-hover:opacity-100 dark:border-white/10 dark:bg-slate-900/95 dark:text-slate-300">
+                    <div className="mb-1.5 text-[11px] font-semibold text-slate-800 dark:text-slate-100">OpenClaw Profile</div>
+                    <ul className="space-y-1 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                      <li>Turns on Uncensored mode.</li>
+                      <li>Disables Personal Memory injection.</li>
+                      <li>Clears the app System Prompt field.</li>
+                      <li>Leaves model-level behavior untouched.</li>
+                    </ul>
+                  </div>
                 </div>
 
                 <div data-menu-container="true" className="relative order-4">
@@ -4112,7 +4515,7 @@ export default function ChatApp() {
 
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
-                  className={`flex-1 w-full rounded-xl px-2 text-sm font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition ${isStreaming ? 'bg-red-500 hover:brightness-95' : 'bg-accent hover:brightness-95'}`}
+                  className={`w-full rounded-xl px-2 py-2 text-sm font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition ${isStreaming ? 'bg-red-500 hover:brightness-95' : 'bg-accent hover:brightness-95'}`}
                 >
                   {isStreaming ? 'Stop' : 'Send'}
                 </button>

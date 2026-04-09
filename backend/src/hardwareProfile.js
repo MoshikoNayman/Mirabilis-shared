@@ -561,16 +561,23 @@ async function getWindowsProfile() {
   });
 }
 
+let _cachedProfile = null;
+
 export async function getLocalHardwareProfile() {
+  if (_cachedProfile) return _cachedProfile;
+  let profile;
   switch (process.platform) {
     case 'darwin':
-      return getDarwinProfile();
+      profile = await getDarwinProfile();
+      break;
     case 'linux':
-      return getLinuxProfile();
+      profile = await getLinuxProfile();
+      break;
     case 'win32':
-      return getWindowsProfile();
+      profile = await getWindowsProfile();
+      break;
     default:
-      return buildProfile({
+      profile = await buildProfile({
         vendor: vendorFromStrings(os.arch()),
         backend: 'CPU',
         archName: normalizeWhitespace(os.arch()),
@@ -587,4 +594,6 @@ export async function getLocalHardwareProfile() {
         subProcessorInfo: 'Sub-processor info unavailable'
       });
   }
+  _cachedProfile = profile;
+  return profile;
 }

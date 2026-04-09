@@ -208,6 +208,9 @@ export class McpConnectorService {
     this.state = {
       servers: []
     };
+    // Cache initialized session IDs per server to avoid redundant handshakes and
+    // ensure stateful MCP servers receive tool calls on the same session.
+    this._sessionCache = new Map(); // serverId -> { sessionId, expiresAt }
   }
 
   async init() {
@@ -252,6 +255,7 @@ export class McpConnectorService {
       existing.authToken = candidate.authToken;
       existing.toolPolicy = normalizeToolPolicy(input.toolPolicy, existing.toolPolicy);
       existing.updatedAt = nowIso();
+      this._sessionCache.delete(existing.id); // URL/auth changed, force re-init
       await this.persist();
       return summarizeServer(existing);
     }
@@ -268,6 +272,7 @@ export class McpConnectorService {
     if (this.state.servers.length === before) {
       return false;
     }
+    this._sessionCache.delete(key);
     await this.persist();
     return true;
   }
@@ -335,10 +340,20 @@ export class McpConnectorService {
     };
   }
 
-  async listTools(id, timeoutMs = 15000) {
+  async _ensureSession(id, timeoutMs) {
+    const cached = this._sessionCache.get(id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.sessionId;
+    }
     const init = await this.initializeServer(id, timeoutMs);
+    this._sessionCache.set(id, { sessionId: init.sessionId, expiresAt: Date.now() + 300_000 });
+    return init.sessionId;
+  }
+
+  async listTools(id, timeoutMs = 15000) {
+    const sessionId = await this._ensureSession(id, timeoutMs);
     const server = this.getServer(id);
-    const response = await postJsonRpc(server, 'tools/list', {}, timeoutMs, init.sessionId || '');
+    const response = await postJsonRpc(server, 'tools/list', {}, timeoutMs, sessionId || '');
     return {
       tools: Array.isArray(response?.result?.tools) ? response.result.tools : [],
       raw: response?.result || {}
@@ -354,7 +369,7 @@ export class McpConnectorService {
       throw new Error('tool arguments must be an object');
     }
 
-    const init = await this.initializeServer(id, timeoutMs);
+    const init = await this._ensureSession(id, timeoutMs);
     const server = this.getServer(id);
     const response = await postJsonRpc(
       server,
@@ -364,7 +379,7 @@ export class McpConnectorService {
         arguments: args || {}
       },
       timeoutMs,
-      init.sessionId || ''
+      init || ''
     );
 
     return response?.result || {};

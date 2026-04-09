@@ -3,7 +3,7 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import { mkdir, writeFile, readFile, appendFile, unlink, readdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { exec as cpExec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -442,6 +442,45 @@ app.get('/api/system/hardware-profile', async (_req, res) => {
   }
 });
 
+let _utilizationCache = null;
+let _utilizationCacheAt = 0;
+
+app.get('/api/system/utilization', async (_req, res) => {
+  const now = Date.now();
+  if (_utilizationCache && now - _utilizationCacheAt < 3000) {
+    return res.json(_utilizationCache);
+  }
+
+  const cpus = os.cpus();
+  const load1 = os.loadavg()[0];
+  const cpuPct = Math.min(100, Math.round((load1 / (cpus.length || 1)) * 100));
+
+  let memPct;
+  if (process.platform === 'darwin') {
+    try {
+      // vm_stat gives page counts; wired + active = actual pressure, speculative/inactive = reclaimable
+      const { stdout } = await promisify(cpExec)('vm_stat', { timeout: 2000 });
+      const pageSize = Number(stdout.match(/page size of (\d+)/)?.[1] || 4096);
+      const grab = (label) => Number(stdout.match(new RegExp(`${label}[^:]*:\\s*(\\d+)`))?.[1] || 0);
+      const wired    = grab('Pages wired down');
+      const active   = grab('Pages active');
+      const occupied = grab('Pages occupied by compressor');
+      const total    = os.totalmem();
+      const pressureBytes = (wired + active + occupied) * pageSize;
+      memPct = Math.min(100, Math.round((pressureBytes / total) * 100));
+    } catch {
+      // fallback to os module if vm_stat unavailable
+      memPct = Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 100);
+    }
+  } else {
+    memPct = Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 100);
+  }
+
+  _utilizationCache = { cpuPct, memPct };
+  _utilizationCacheAt = Date.now();
+  res.json(_utilizationCache);
+});
+
 app.get('/api/voice/status', async (_req, res) => {
   try {
     const status = await getVoiceToolsStatus();
@@ -567,7 +606,7 @@ app.post('/api/providers/switch-model', async (req, res) => {
     : 'http://127.0.0.1:8000/v1/models';
 
   try {
-    await exec('pkill -f "llama-server|koboldcpp" || true');
+    await execAsync('pkill -f "llama-server|koboldcpp" || true');
   } catch {
     // no-op
   }
@@ -585,10 +624,12 @@ app.post('/api/providers/switch-model', async (req, res) => {
     : ['-m', modelPath, '-ngl', '50', '--threads', String(threads), '--threads-batch', String(threads), '--threads-http', String(threads), '--port', String(port)];
 
   const logFile = provider === 'koboldcpp' ? '/tmp/koboldcpp.log' : '/tmp/llama.log';
+  const logStream = createWriteStream(logFile, { flags: 'w' });
   const proc = spawn(binary, args, {
     detached: true,
-    stdio: ['ignore', 'ignore', 'ignore']
+    stdio: ['ignore', 'ignore', logStream]
   });
+  logStream.unref();
   proc.unref();
 
   const ready = await waitForEndpoint(healthUrl, 30000);
@@ -1287,6 +1328,10 @@ app.post('/api/web-search', async (req, res) => {
     return;
   }
   webSearchLastCall.set(ip, now);
+  // Evict stale entries to keep map bounded
+  for (const [key, ts] of webSearchLastCall) {
+    if (now - ts > 60_000) webSearchLastCall.delete(key);
+  }
 
   const { query, maxResults } = req.body || {};
   if (!query || typeof query !== 'string' || !query.trim()) {
@@ -1394,6 +1439,10 @@ app.patch('/api/chats/:chatId', async (req, res) => {
     chat.uncensoredMode = req.body.uncensoredMode;
     chat.updatedAt = nowIso();
   }
+  if (typeof req.body?.title === 'string' && req.body.title.trim()) {
+    chat.title = req.body.title.trim().slice(0, 80);
+    chat.updatedAt = nowIso();
+  }
   await saveChat(config.chatStorePath, chat);
   res.json({ chat });
 });
@@ -1404,7 +1453,7 @@ app.delete('/api/chats', async (_req, res) => {
 });
 
 app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
-  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey } = req.body || {};
+  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens } = req.body || {};
   const chatId = req.params.chatId;
 
   if (!content || typeof content !== 'string') {
@@ -1424,6 +1473,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   }
 
   const timestamp = nowIso();
+  const prevChatUpdatedAt = chat.updatedAt;
   const chatUncensoredMode = typeof uncensoredMode === 'boolean'
     ? uncensoredMode
     : chat.uncensoredMode === true;
@@ -1523,6 +1573,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       signal: abortController.signal,
       overrideBaseUrl: typeof providerBaseUrl === 'string' && providerBaseUrl.trim() ? providerBaseUrl.trim() : undefined,
       overrideApiKey: typeof providerApiKey === 'string' ? providerApiKey.trim() : undefined,
+      temperature: typeof temperature === 'number' && isFinite(temperature) ? temperature : undefined,
+      maxTokens: typeof maxTokens === 'number' && isFinite(maxTokens) && maxTokens > 0 ? Math.round(maxTokens) : undefined,
       onToken: (token) => {
         assistantText += token;
         sendSSE(res, 'token', { token });
@@ -1575,6 +1627,12 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
     res.end();
   } catch (error) {
+    // Roll back the user message if nothing was streamed (e.g. model not running)
+    if (!assistantText) {
+      chat.messages = chat.messages.filter((m) => m.id !== userMessage.id);
+      chat.updatedAt = prevChatUpdatedAt;
+      await saveChat(config.chatStorePath, chat).catch(() => {});
+    }
     sendSSE(res, 'error', { error: error.message || 'Unknown error' });
     res.end();
   }
