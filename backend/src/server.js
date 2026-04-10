@@ -939,7 +939,7 @@ const mcpAuditLogPath = join(dirname(config.chatStorePath), 'mcp-audit.jsonl');
 const mcpConnector = new McpConnectorService({
   filePath: mcpStorePath,
   clientName: 'mirabilis',
-  clientVersion: '26.2R1'
+  clientVersion: '26.3R1-S3'
 });
 let mcpInitPromise = null;
 const mcpApprovalTokens = new Map(); // token -> { serverId, toolName, argsHash, expiresAt }
