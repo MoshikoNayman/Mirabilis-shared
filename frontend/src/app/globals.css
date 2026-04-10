@@ -2,18 +2,215 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* ─────────────────────────────────────────────────────────────────────────
+   COLOR SCHEMES  (applied via  html[data-color-scheme="x"])
+   Four schemes × light/dark variants.
+   Default = mirabilis (no attribute needed).
+───────────────────────────────────────────────────────────────────────── */
+
+/* ── Mirabilis (default) ── green accent, modern blue-tinted light bg ── */
+:root,
+[data-color-scheme="mirabilis"] {
   color-scheme: light;
   --bg-start: #f3f6fb;
-  --bg-mid: #edf4ff;
-  --bg-end: #f9fafb;
-  --text-main: #0f172a;
-  --text-muted: #4b5563;
-  --panel: rgba(255, 255, 255, 0.82);
-  --panel-border: rgba(15, 23, 42, 0.09);
-  --accent: #1aa86f;
-  --accent-soft: #dcfce7;
-  --signal-blue: #1e65ff;
+  --bg-mid:   #edf4ff;
+  --bg-end:   #f9fafb;
+  --text-main:   #0f172a;
+  --text-muted:  #4b5563;
+  --panel:        rgba(255,255,255,0.82);
+  --panel-border: rgba(15,23,42,0.09);
+  --accent:       #1aa86f;
+  --accent-soft:  #dcfce7;
+  --signal-blue:  #1e65ff;
+  /* code block — Frosted Light: multi-color syntax */
+  --code-bg:      #f0faf5;
+  --code-header:  rgba(228,248,238,0.97);
+  --code-border:  rgba(26,168,111,0.18);
+  --code-text:    #1a2e24;
+  --code-comment: #7a9e8a;
+  --code-keyword: #0d6e44;
+  --code-tag:     #b91c1c;
+  --code-attr:    #1d4ed8;
+  --code-string:  #92400e;
+  --code-number:  #6d28d9;
+  --code-fn:      #0369a1;
+  --code-lang:    #1aa86f;
+}
+
+/* ── Dusk ── deep indigo/violet, twilight aesthetic, ultra-subtle ── */
+[data-color-scheme="dusk"] {
+  color-scheme: light;
+  --bg-start: #f4f4ff;
+  --bg-mid:   #f0f0fe;
+  --bg-end:   #f8f8ff;
+  --text-main:   #1a1640;
+  --text-muted:  #5a5580;
+  --panel:        rgba(248,248,255,0.90);
+  --panel-border: rgba(80,70,228,0.11);
+  --accent:       #5046e4;
+  --accent-soft:  #ede9fe;
+  --signal-blue:  #5046e4;
+  /* code block — deep space dark */
+  --code-bg:      #0d0b1e;
+  --code-header:  rgba(8,6,16,0.97);
+  --code-border:  rgba(80,70,228,0.25);
+  --code-text:    #d4d0f8;
+  --code-comment: #5a5580;
+  --code-keyword: #c084fc;
+  --code-tag:     #f472b6;
+  --code-attr:    #67e8f9;
+  --code-string:  #86efac;
+  --code-number:  #fbbf24;
+  --code-fn:      #a5b4fc;
+  --code-lang:    #818cf8;
+}
+
+/* ── Ember ── warm parchment, amber accent, editorial feel ── */
+[data-color-scheme="ember"] {
+  color-scheme: light;
+  --bg-start: #fdf6e8;
+  --bg-mid:   #fef9f0;
+  --bg-end:   #fffdf8;
+  --text-main:   #2c1a08;
+  --text-muted:  #8a6a44;
+  --panel:        rgba(255,252,244,0.92);
+  --panel-border: rgba(180,120,40,0.12);
+  --accent:       #c2710c;
+  --accent-soft:  #fde8c8;
+  --signal-blue:  #1e65ff;
+  /* code block — warm dark parchment */
+  --code-bg:      #1e1208;
+  --code-header:  rgba(20,10,4,0.97);
+  --code-border:  rgba(194,113,12,0.25);
+  --code-text:    #f5e6cc;
+  --code-comment: #7a6040;
+  --code-keyword: #f0a050;
+  --code-tag:     #e07070;
+  --code-attr:    #80c4e0;
+  --code-string:  #a8d88a;
+  --code-number:  #c9a8f5;
+  --code-fn:      #f5c842;
+  --code-lang:    #c2710c;
+}
+
+/* ── Summit ── Apple design language: SF-clean neutral, system blue ── */
+[data-color-scheme="summit"] {
+  color-scheme: light;
+  --bg-start: #f5f5f7;
+  --bg-mid:   #fafafa;
+  --bg-end:   #ffffff;
+  --text-main:   #1d1d1f;
+  --text-muted:  #6e6e73;
+  --panel:        rgba(255,255,255,0.85);
+  --panel-border: rgba(0,0,0,0.08);
+  --accent:       #007aff;
+  --accent-soft:  #dbeafe;
+  --signal-blue:  #007aff;
+  /* code block — Xcode Dark */
+  --code-bg:      #1c1c1e;
+  --code-header:  rgba(20,20,22,0.98);
+  --code-border:  rgba(0,122,255,0.22);
+  --code-text:    #f2f2f7;
+  --code-comment: #6c7b8a;
+  --code-keyword: #ff9f0a;
+  --code-tag:     #fc6a5d;
+  --code-attr:    #41a1c0;
+  --code-string:  #fc6a5d;
+  --code-number:  #d9c97c;
+  --code-fn:      #30d158;
+  --code-lang:    #64b5f6;
+}
+
+/* ───── Dark variants of each scheme ───── */
+.dark:root,
+.dark [data-color-scheme="mirabilis"],
+.dark[data-color-scheme="mirabilis"] {
+  color-scheme: dark;
+  --text-main:   #e5e7eb;
+  --text-muted:  #a3acc1;
+  --panel:        rgba(9,15,28,0.78);
+  --panel-border: rgba(148,163,184,0.17);
+  --code-bg:      #071a10;
+  --code-header:  rgba(5,20,12,0.96);
+  --code-border:  rgba(26,168,111,0.2);
+  --code-text:    #d1fae5;
+  --code-comment: #4a7a62;
+  --code-keyword: #5ae2aa;
+  --code-tag:     #fca5a5;
+  --code-attr:    #93c5fd;
+  --code-string:  #fcd34d;
+  --code-number:  #c4b5fd;
+  --code-fn:      #6ee7b7;
+  --code-lang:    #34d399;
+}
+
+.dark [data-color-scheme="dusk"],
+.dark[data-color-scheme="dusk"] {
+  color-scheme: dark;
+  --text-main:   #ddd8ff;
+  --text-muted:  #8880cc;
+  --panel:        rgba(12,10,30,0.84);
+  --panel-border: rgba(100,90,255,0.22);
+  --accent:       #8075f0;
+  --accent-soft:  #1c1840;
+  --code-bg:      #0d0b1e;
+  --code-header:  rgba(6,4,14,0.98);
+  --code-border:  rgba(128,117,240,0.22);
+  --code-text:    #d4d0f8;
+  --code-comment: #5a5580;
+  --code-keyword: #c084fc;
+  --code-tag:     #f472b6;
+  --code-attr:    #67e8f9;
+  --code-string:  #86efac;
+  --code-number:  #fbbf24;
+  --code-fn:      #a5b4fc;
+  --code-lang:    #8075f0;
+}
+
+.dark [data-color-scheme="ember"],
+.dark[data-color-scheme="ember"] {
+  color-scheme: dark;
+  --text-main:   #f0dfc0;
+  --text-muted:  #b09060;
+  --panel:        rgba(28,16,6,0.84);
+  --panel-border: rgba(194,113,12,0.20);
+  --accent:       #e8900a;
+  --accent-soft:  #301a04;
+  --code-bg:      #1e1208;
+  --code-header:  rgba(14,8,2,0.98);
+  --code-border:  rgba(232,144,10,0.20);
+  --code-text:    #f5e6cc;
+  --code-comment: #7a6040;
+  --code-keyword: #f0a050;
+  --code-tag:     #e07070;
+  --code-attr:    #80c4e0;
+  --code-string:  #a8d88a;
+  --code-number:  #c9a8f5;
+  --code-fn:      #f5c842;
+  --code-lang:    #e8900a;
+}
+
+.dark [data-color-scheme="summit"],
+.dark[data-color-scheme="summit"] {
+  color-scheme: dark;
+  --text-main:   #f5f5f7;
+  --text-muted:  #8e8e93;
+  --panel:        rgba(28,28,30,0.82);
+  --panel-border: rgba(255,255,255,0.10);
+  --accent:       #0a84ff;
+  --accent-soft:  #0a1a2e;
+  --code-bg:      #1c1c1e;
+  --code-header:  rgba(12,12,14,0.98);
+  --code-border:  rgba(10,132,255,0.22);
+  --code-text:    #f2f2f7;
+  --code-comment: #6c7b8a;
+  --code-keyword: #ff9f0a;
+  --code-tag:     #fc6a5d;
+  --code-attr:    #41a1c0;
+  --code-string:  #fc6a5d;
+  --code-number:  #d9c97c;
+  --code-fn:      #30d158;
+  --code-lang:    #64b5f6;
 }
 
 html,
@@ -30,23 +227,36 @@ body {
   margin: 0;
   font-family: var(--font-ui), 'SF Pro Text', 'Helvetica Neue', sans-serif;
   background:
-    radial-gradient(ellipse at 10% 0%, rgba(30, 101, 255, 0.09), transparent 40%),
-    radial-gradient(ellipse at 85% 10%, rgba(26, 168, 111, 0.09), transparent 42%),
-    linear-gradient(160deg, #eef5ff 0%, #f0f9f5 45%, #f8fafc 100%);
+    radial-gradient(ellipse at 10% 0%, rgba(30,101,255,0.09), transparent 40%),
+    radial-gradient(ellipse at 85% 10%, rgba(26,168,111,0.09), transparent 42%),
+    linear-gradient(160deg, var(--bg-start) 0%, var(--bg-mid) 45%, var(--bg-end) 100%);
   color: var(--text-main);
 }
 
 .dark body {
-  color-scheme: dark;
-  --text-main: #e5e7eb;
-  --text-muted: #a3acc1;
-  --panel: rgba(9, 15, 28, 0.78);
-  --panel-border: rgba(148, 163, 184, 0.17);
   background:
-    radial-gradient(ellipse at 8% 0%, rgba(30, 101, 255, 0.18), transparent 40%),
-    radial-gradient(ellipse at 88% 8%, rgba(26, 168, 111, 0.14), transparent 42%),
+    radial-gradient(ellipse at 8% 0%, rgba(30,101,255,0.18), transparent 40%),
+    radial-gradient(ellipse at 88% 8%, rgba(26,168,111,0.14), transparent 42%),
     linear-gradient(155deg, #070d1a 0%, #0d1a2e 55%, #0a1520 100%);
   color: var(--text-main);
+}
+
+/* Dusk dark body */
+.dark [data-color-scheme="dusk"] body,
+.dark[data-color-scheme="dusk"] body {
+  background: linear-gradient(155deg, #07061a 0%, #0d0b28 55%, #090718 100%);
+}
+
+/* Ember dark body */
+.dark [data-color-scheme="ember"] body,
+.dark[data-color-scheme="ember"] body {
+  background: linear-gradient(155deg, #0e0804 0%, #1a1008 55%, #120c04 100%);
+}
+
+/* Summit dark body */
+.dark [data-color-scheme="summit"] body,
+.dark[data-color-scheme="summit"] body {
+  background: linear-gradient(155deg, #000000 0%, #0a0a0f 55%, #050508 100%);
 }
 
 .scroll-thin::-webkit-scrollbar {
@@ -71,6 +281,15 @@ body {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.img-shimmer {
+  animation: shimmer 1.6s ease-in-out infinite;
 }
 
 .icq-mark {

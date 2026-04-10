@@ -2,6 +2,21 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S3] — 2026-04-10
+
+### UI Polish & Styling Session
+
+- **4-scheme palette system** — Mirabilis (green), Dusk (indigo/violet), Ember (warm amber), Summit (Apple blue). Replaces hardcoded accent values with CSS custom properties; Tailwind `accent`/`accentSoft` tokens now resolve from CSS vars, so all components update automatically on scheme switch.
+- **Palette picker** — 4-button pill grid in the Appearance panel; no-flash restore via inline script in `layout.js`.
+- **Syntax highlighting** — `react-syntax-highlighter` (Prism) with a per-scheme 13-var token theme covering comment, keyword, tag, attr, string, number, fn, and lang tokens. Line numbers included.
+- **Streaming phase labels** — typing indicator cycles through Processing → Thinking → Generating → Loading model → Still working… phases during long inference.
+- **Role labels** — "user" → "You", "assistant" → "AI".
+- **Auto-scroll overhaul** — programmatic vs. user scroll guard via `isProgrammaticScrollRef`; ref checked inside `requestAnimationFrame` (not just at effect entry) to close the RAF-queue race. `lastScrollTopRef` synced after every programmatic scroll so direction detection stays accurate.
+- **"New messages ↓" pill** — centered at bottom of chat, themed to current palette accent color.
+- **Dusk replaces Flower** — Flower (teal) was too close in hue to Mirabilis (green). Dusk uses deep indigo (`#5046e4`) with a deep-space code block. LocalStorage validation updated; old `flower` value gracefully falls back to Mirabilis.
+- **Bug fix** — duplicate stray `</button>` JSX in palette picker (caused by a prior edit) removed.
+- **Bug fix** — `layout.js` pre-hydration scheme script now validates against whitelist before setting attribute, preventing flash if an obsolete scheme name is in localStorage.
+
 ## [26.3R1] — 2026-04-08
 
 ### Chat Sidebar Enhancements

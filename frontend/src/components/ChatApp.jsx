@@ -2,6 +2,8 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const DEFAULT_SYSTEM_PROMPT = 'You are Mirabilis AI, a concise and helpful local assistant. You run entirely on the user\'s own device — never describe yourself as cloud-based or as a generic AI product. When someone asks who created or built you, answer naturally and briefly: Mirabilis AI was created by Moshiko Nayman. Do not volunteer that information unprompted. Image generation is available locally via a Stable Diffusion service — generate real images rather than ASCII art when asked.';
@@ -31,6 +33,37 @@ function isUncensoredModelRecord(item) {
     String(item?.group || '').toLowerCase() === 'uncensored' ||
     /uncensored|dolphin|abliterated|surge/.test(haystack)
   );
+}
+
+// Models with guaranteed 128K+ context window — preferred when conversation is large.
+// (phi4=16K, mistral/mixtral=32K are excluded intentionally)
+const LARGE_CONTEXT_PRIORITY = [
+  'llama3.3', 'llama3.1', 'qwen3', 'deepseek-r1', 'gemma4:31b', 'gemma4:26b',
+  'gemma3:27b', 'gemma3:12b', 'gemma4:e4b', 'gemma4:e2b', 'gemma3', 'qwen2.5', 'llama3'
+];
+
+// Priority list for Auto mode when context is small — most capable installed model first.
+const AUTO_MODEL_PRIORITY = [
+  'llama3.3', 'qwen3', 'deepseek-r1', 'mistral-large', 'gemma4:31b', 'gemma4:26b',
+  'gemma3:27b', 'gemma3:12b', 'llama3.1', 'gemma4:e4b', 'gemma4:e2b',
+  'mistral', 'gemma3', 'qwen2.5', 'phi4', 'llama3'
+];
+
+// Threshold above which we switch to context-first routing (in tokens ~= 6K chars).
+const LARGE_CONTEXT_THRESHOLD = 6000;
+
+function pickBestAutoModel(modelsList = [], contextTokens = 0) {
+  const installed = (modelsList || []).filter(
+    (item) => item?.available !== false && item?.group !== 'Uncensored'
+  );
+  const priority = contextTokens > LARGE_CONTEXT_THRESHOLD ? LARGE_CONTEXT_PRIORITY : AUTO_MODEL_PRIORITY;
+  for (const preferred of priority) {
+    const match = installed.find(
+      (item) => item?.id === preferred || item?.ollamaId === preferred
+    );
+    if (match) return match;
+  }
+  return installed[0] || null;
 }
 
 function pickMostUncensoredModel(modelsList = []) {
@@ -154,6 +187,9 @@ function estimateModelContextWindow(modelId) {
   if (id.includes('jamba')) return 262144;
   // Phi-4: 16K
   if (id.includes('phi4')) return 16384;
+  // Gemma 4: 26b/31b = 256K; e2b/e4b = 128K
+  if (id.includes('gemma4') && (id.includes('26b') || id.includes('31b'))) return 262144;
+  if (id.includes('gemma4')) return 131072;
   // Gemma 3: 128K; older Gemma: 8K
   if (id.includes('gemma3')) return 131072;
   if (id.includes('gemma')) return 8192;
@@ -208,6 +244,57 @@ function CopyMessageButton({ text }) {
 // which is unreliable for list containers when content is mixed or nested.
 const RTL_CHARS_RE = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
+// Syntax highlight theme — CSS-var-driven so it instantly reacts to scheme changes.
+// Defined at module level so it's never recreated per render.
+const SYNTAX_THEME = {
+  'code[class*="language-"]': {
+    color: 'var(--code-text)',
+    background: 'none',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    lineHeight: 'inherit',
+  },
+  'pre[class*="language-"]': { background: 'none', margin: 0, padding: 0 },
+  comment:             { color: 'var(--code-comment)', fontStyle: 'italic' },
+  prolog:              { color: 'var(--code-comment)', fontStyle: 'italic' },
+  doctype:             { color: 'var(--code-comment)', fontStyle: 'italic' },
+  cdata:               { color: 'var(--code-comment)', fontStyle: 'italic' },
+  punctuation:         { color: 'color-mix(in srgb, var(--code-text) 65%, transparent)' },
+  tag:                 { color: 'var(--code-tag)' },
+  'tag .punctuation':  { color: 'var(--code-tag)' },
+  'attr-name':         { color: 'var(--code-attr)' },
+  'attr-value':        { color: 'var(--code-string)' },
+  string:              { color: 'var(--code-string)' },
+  char:                { color: 'var(--code-string)' },
+  'template-string':   { color: 'var(--code-string)' },
+  'template-punctuation': { color: 'var(--code-string)' },
+  number:              { color: 'var(--code-number)' },
+  boolean:             { color: 'var(--code-number)' },
+  keyword:             { color: 'var(--code-keyword)', fontWeight: '600' },
+  atrule:              { color: 'var(--code-keyword)' },
+  'control-flow':      { color: 'var(--code-keyword)', fontWeight: '600' },
+  function:            { color: 'var(--code-fn)' },
+  'function-variable': { color: 'var(--code-fn)' },
+  'class-name':        { color: 'var(--code-fn)' },
+  property:            { color: 'var(--code-attr)' },
+  selector:            { color: 'var(--code-tag)' },
+  builtin:             { color: 'var(--code-fn)' },
+  constant:            { color: 'var(--code-number)' },
+  symbol:              { color: 'var(--code-number)' },
+  operator:            { color: 'color-mix(in srgb, var(--code-text) 75%, transparent)' },
+  entity:              { color: 'var(--code-attr)', cursor: 'help' },
+  url:                 { color: 'var(--code-attr)' },
+  regex:               { color: 'var(--code-string)' },
+  important:           { color: 'var(--code-keyword)', fontWeight: 'bold' },
+  variable:            { color: 'var(--code-text)' },
+  namespace:           { color: 'var(--code-fn)' },
+  bold:                { fontWeight: 'bold' },
+  italic:              { fontStyle: 'italic' },
+  // line numbers
+  'line-numbers.line-numbers .line-numbers-rows': { borderRightColor: 'color-mix(in srgb, var(--code-text) 12%, transparent)' },
+  'line-numbers-rows > span:before': { color: 'color-mix(in srgb, var(--code-text) 30%, transparent)' },
+};
+
 // Static markdown component overrides — defined at module level so they're never recreated.
 // These elements intentionally carry NO `dir` attribute; they inherit direction from the
 // outer wrapper which is set explicitly in renderMessageContent via RTL_CHARS_RE.
@@ -227,15 +314,41 @@ const MD_STATIC_COMPONENTS = {
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:brightness-90">{children}</a>
   ),
+  table: ({ children }) => (
+    <div className="my-2 overflow-x-auto rounded-lg border border-black/10 dark:border-white/10">
+      <table className="w-full text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-black/5 dark:bg-white/5">{children}</thead>,
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => <tr className="border-t border-black/5 dark:border-white/5">{children}</tr>,
+  th: ({ children }) => <th className="px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">{children}</th>,
+  td: ({ children }) => <td className="px-3 py-1.5 text-slate-700 dark:text-slate-300">{children}</td>,
 };
 
 function renderMessageContent(content, message = {}, remoteCtx = {}) {
   const { remoteConnectedRef, remoteTargetRef, execResultsRef, onRunCommand } = remoteCtx;
   if (message.imageGenerating) {
     return (
-      <div className="flex items-center gap-2.5 py-1">
-        <div className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-        <span className="text-sm text-slate-500 dark:text-slate-400">Generating image on your device...</span>
+      <div
+        className="relative overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-700"
+        style={{ width: 288, height: 288 }}
+        aria-label="Generating image…"
+      >
+        {/* Shimmer sweep — pure CSS, GPU-only */}
+        <div
+          className="img-shimmer pointer-events-none absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/10"
+          style={{ willChange: 'transform' }}
+        />
+        {/* Bottom label */}
+        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-gradient-to-t from-black/25 to-transparent rounded-b-xl">
+          <svg className="h-3.5 w-3.5 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="18" height="18" rx="3" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+          <span className="text-xs font-medium text-white/80">Generating image…</span>
+        </div>
       </div>
     );
   }
@@ -261,7 +374,8 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
   const mdComponents = {
     ...MD_STATIC_COMPONENTS,
     code({ inline, className, children, ...props }) {
-      const lang = (className || '').replace('language-', '') || 'code';
+      const lang = (className || '').replace('language-', '') || '';
+      const displayLang = lang || 'code';
       const codeText = String(children).replace(/\n$/, '');
       if (inline) {
         return (
@@ -271,13 +385,14 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
         );
       }
       // Unique key for this code block within this message
-      const blockKey = `${message?.id || 'msg'}-${lang}-${codeText.slice(0, 40)}`;
+      const blockKey = `${message?.id || 'msg'}-${displayLang}-${codeText.slice(0, 40)}`;
       const execResult = execResultsRef.current[blockKey];
       const canRun = !inline && isShellLang(lang) && remoteConnectedRef.current;
+
       return (
-        <figure className="relative overflow-clip rounded-xl border border-black/15 bg-slate-950 text-slate-100 dark:border-white/20">
-          <figcaption className="sticky top-0 z-10 flex items-center border-b border-white/10 bg-black/80 px-3 py-1 backdrop-blur-sm">
-            <span className="text-[10px] uppercase tracking-[0.12em] text-slate-300">{lang}</span>
+        <figure className="relative overflow-clip rounded-xl border" style={{ background: 'var(--code-bg)', borderColor: 'var(--code-border)', color: 'var(--code-text)' }}>
+          <figcaption className="sticky top-0 z-10 flex items-center border-b px-3 py-1 backdrop-blur-sm" style={{ background: 'var(--code-header)', borderColor: 'var(--code-border)' }}>
+            <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--code-lang)' }}>{displayLang}</span>
             {canRun && (
               <button
                 type="button"
@@ -291,9 +406,21 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
             )}
             <CopyButton text={codeText} />
           </figcaption>
-          <pre className="overflow-x-auto p-3 text-[12px] leading-5 sm:text-[13px]">
-            <code className="font-mono">{codeText}</code>
-          </pre>
+          <div className="overflow-x-auto p-3 text-[12px] leading-5 sm:text-[13px]">
+            <SyntaxHighlighter
+              language={lang || 'text'}
+              style={SYNTAX_THEME}
+              showLineNumbers
+              lineNumberStyle={{ color: 'color-mix(in srgb, var(--code-text) 28%, transparent)', minWidth: '2.2em', userSelect: 'none', paddingRight: '1em' }}
+              PreTag="div"
+              CodeTag="code"
+              customStyle={{ background: 'none', margin: 0, padding: 0, fontFamily: 'var(--font-mono), monospace' }}
+              codeTagProps={{ className: 'font-mono' }}
+              wrapLongLines={false}
+            >
+              {codeText}
+            </SyntaxHighlighter>
+          </div>
           {execResult && !execResult.running && (
             <div className="border-t border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px]">
               {execResult.stdout && (
@@ -318,7 +445,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
 
   return (
     <div className="markdown-body text-sm" dir={dir}>
-      <ReactMarkdown components={mdComponents}>{text}</ReactMarkdown>
+      <ReactMarkdown components={mdComponents} remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   );
 }
@@ -463,6 +590,7 @@ const MessageRow = memo(function MessageRow({
   message,
   isLast,
   isStreaming,
+  streamingLabel,
   speakingMessageId,
   isSpeaking,
   voiceEngine,
@@ -487,17 +615,22 @@ const MessageRow = memo(function MessageRow({
       }`}
     >
       <div className="mb-1 flex items-center justify-between gap-3 text-[10px] uppercase opacity-70">
-        <span>{message.role}</span>
-        <span className="font-mono normal-case opacity-80">
-          Est. {formatTokenCount(message.tokenEstimate || 0)}
-        </span>
+        <span>{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'AI' : message.role}</span>
+        {!message.imageUrl && !message.imageGenerating && (
+          <span className="font-mono normal-case opacity-80">
+            Est. {formatTokenCount(message.tokenEstimate || 0)}
+          </span>
+        )}
       </div>
-      {isStreaming && !message.content && message.role === 'assistant' && isLast
+      {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
         ? (
           <div className="flex items-center gap-1.5 py-1">
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
+            {streamingLabel && (
+              <span className="ml-1 text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500">{streamingLabel}</span>
+            )}
           </div>
         )
         : renderMessageContent(message.content, message, { remoteConnectedRef, remoteTargetRef, execResultsRef, onRunCommand: runCommand })}
@@ -592,6 +725,7 @@ const MessageRow = memo(function MessageRow({
   prev.message === next.message &&
   prev.isLast === next.isLast &&
   prev.isStreaming === next.isStreaming &&
+  prev.streamingLabel === next.streamingLabel &&
   prev.speakingMessageId === next.speakingMessageId &&
   prev.isSpeaking === next.isSpeaking &&
   prev.voiceEngine === next.voiceEngine &&
@@ -606,6 +740,7 @@ export default function ChatApp() {
   const dragCounterRef = useRef(0);
   const messagesScrollRef = useRef(null);
   const lastScrollTopRef = useRef(0);
+  const isProgrammaticScrollRef = useRef(false); // true while we're scrolling programmatically
   const speechSynthesisRef = useRef(null);
   const piperAudioRef = useRef(null);
   const chatScrollPositions = useRef({});
@@ -621,6 +756,7 @@ export default function ChatApp() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingLabel, setStreamingLabel] = useState('');
   const [themeMode, setThemeMode] = useState(() => {
     if (typeof window !== 'undefined') return window.localStorage.getItem('local-ai-theme-mode') || 'auto';
     return 'auto';
@@ -628,6 +764,13 @@ export default function ChatApp() {
   const [uiFont, setUiFont] = useState(() => {
     if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-font') || 'jakarta';
     return 'jakarta';
+  });
+  const [colorScheme, setColorScheme] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const v = window.localStorage.getItem('mirabilis-color-scheme') || 'mirabilis';
+      return ['mirabilis','dusk','ember','summit'].includes(v) ? v : 'mirabilis';
+    }
+    return 'mirabilis';
   });
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [models, setModels] = useState([]);
@@ -646,7 +789,10 @@ export default function ChatApp() {
     };
   });
   const [isProviderConfigOpen, setIsProviderConfigOpen] = useState(false);
-  const [model, setModel] = useState('llama3');
+  const [model, setModel] = useState(() => {
+    if (typeof window !== 'undefined') return window.localStorage.getItem('local-ai-model') || 'auto';
+    return 'auto';
+  });
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [statusText, setStatusText] = useState('Ready');
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
@@ -730,6 +876,7 @@ export default function ChatApp() {
   const [isTeachPanelOpen, setIsTeachPanelOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const autoScrollRef = useRef(true); // ref mirror — readable synchronously in scroll handler
   const [memoryItems, setMemoryItems] = useState([]);
   const [memoryInput, setMemoryInput] = useState('');
   // Remote Control
@@ -1171,6 +1318,28 @@ export default function ChatApp() {
     }
     window.localStorage.setItem('mirabilis-font', uiFont);
   }, [uiFont]);
+
+  useEffect(() => {
+    if (colorScheme === 'mirabilis') {
+      document.documentElement.removeAttribute('data-color-scheme');
+    } else {
+      document.documentElement.setAttribute('data-color-scheme', colorScheme);
+    }
+    window.localStorage.setItem('mirabilis-color-scheme', colorScheme);
+  }, [colorScheme]);
+
+  useEffect(() => {
+    if (!isStreaming) { setStreamingLabel(''); return; }
+    const phases = [
+      [0,     'Processing…'],
+      [1800,  'Thinking…'],
+      [5500,  'Generating…'],
+      [13000, 'Loading model…'],
+      [28000, 'Still working…'],
+    ];
+    const timers = phases.map(([delay, label]) => setTimeout(() => setStreamingLabel(label), delay));
+    return () => timers.forEach(clearTimeout);
+  }, [isStreaming]);
 
   useEffect(() => {
     window.localStorage.setItem('local-ai-model', model);
@@ -1958,11 +2127,15 @@ export default function ChatApp() {
       const payload = await api(`/api/models?${query.toString()}`);
       const available = payload.models || [];
       setModels(available);
-      const currentIsInstalled = available.some((item) => item.id === model && item.available !== false);
-      if (available.length > 0 && !currentIsInstalled) {
-        const preferred = available.find((item) => item.available !== false) || available[0];
-        setModel(preferred.id);
-      }
+      // If current model is 'auto', no override needed — it resolves at send time.
+      // Only fall back if the explicitly chosen model is no longer installed.
+      setModel((currentModel) => {
+        if (currentModel === 'auto') return 'auto';
+        const stillInstalled = available.some((item) => item.id === currentModel && item.available !== false);
+        if (stillInstalled) return currentModel;
+        // Model was removed — fall back to auto
+        return 'auto';
+      });
     } catch {
       setModels([]);
     }
@@ -1971,7 +2144,9 @@ export default function ChatApp() {
   async function resolveProviderForSend() {
     if (provider === 'ollama') {
       const forcedUncensored = uncensoredMode ? pickMostUncensoredModel(models) : null;
-      const effectiveModel = forcedUncensored?.id || model;
+      const contextTokens = contextUsage?.totalTokens || 0;
+      const resolvedAuto = model === 'auto' ? (pickBestAutoModel(models, contextTokens)?.id || '') : model;
+      const effectiveModel = forcedUncensored?.id || resolvedAuto;
       if (uncensoredMode && forcedUncensored?.id && model !== forcedUncensored.id) {
         setModel(forcedUncensored.id);
       }
@@ -2342,14 +2517,35 @@ export default function ChatApp() {
     window.localStorage.setItem('mirabilis-engine-option', selectedEngine);
   }, [selectedEngine]);
 
-  // Auto-scroll to bottom while streaming new tokens — throttled to one rAF per frame
-  // so rapid token bursts don't trigger a layout read/write on every setState cycle.
+  // Auto-scroll to bottom while streaming new tokens — throttled to one rAF per frame.
+  // IMPORTANT: we re-check autoScrollRef.current INSIDE the RAF, not just at effect entry.
+  // This closes the race where the effect runs (ref=true), queues a RAF, the user scrolls
+  // up (ref→false), then the RAF fires anyway and overrides the user's position.
   useEffect(() => {
-    if (!isStreaming || !autoScrollEnabled || !messagesScrollRef.current) return;
+    if (!isStreaming || !messagesScrollRef.current) return;
     const el = messagesScrollRef.current;
-    const raf = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    const raf = requestAnimationFrame(() => {
+      if (!autoScrollRef.current) return; // re-check right before touching the DOM
+      isProgrammaticScrollRef.current = true;
+      el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollHeight; // keep direction-detection baseline in sync
+      requestAnimationFrame(() => { isProgrammaticScrollRef.current = false; });
+    });
     return () => cancelAnimationFrame(raf);
-  }, [messages, isStreaming, autoScrollEnabled]);
+  }, [messages, isStreaming]); // ref-based guard — autoScrollEnabled state not needed in deps
+
+  // When switching chats, jump to bottom and re-enable auto-scroll.
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    autoScrollRef.current = true;
+    setAutoScrollEnabled(true);
+    setShowScrollDown(false);
+    isProgrammaticScrollRef.current = true;
+    el.scrollTop = el.scrollHeight;
+    lastScrollTopRef.current = el.scrollHeight; // sync baseline
+    requestAnimationFrame(() => { isProgrammaticScrollRef.current = false; });
+  }, [activeChatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // systemPrompt tokens isolated so typing in messages never re-runs estimateTokens(systemPrompt)
   const systemPromptTokens = useMemo(() => estimateTokens(systemPrompt), [systemPrompt]);
@@ -2965,7 +3161,31 @@ export default function ChatApp() {
                     style={style}
                     className={`rounded-full px-1.5 py-0.5 text-[10px] transition ${
                       uiFont === id
-                        ? 'border border-accent bg-accentSoft font-semibold text-ink dark:border-accent/60 dark:bg-accentSoft dark:text-ink'
+                        ? 'border border-accent bg-accentSoft font-semibold text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
+                        : 'border border-transparent text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-300">Palette</div>
+              <div className="grid grid-cols-4 gap-0.5 rounded-full border border-black/10 bg-white/80 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/15 dark:bg-slate-900/85">
+                {[
+                  { id: 'mirabilis', label: 'Mirabilis' },
+                  { id: 'dusk',      label: 'Dusk' },
+                  { id: 'ember',     label: 'Ember' },
+                  { id: 'summit',    label: 'Summit' },
+                ].map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setColorScheme(id)}
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] transition ${
+                      colorScheme === id
+                        ? 'border border-accent bg-accentSoft font-semibold text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
                         : 'border border-transparent text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10'
                     }`}
                   >
@@ -3161,7 +3381,7 @@ export default function ChatApp() {
                               }}
                               className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                                 selectedEngine === option
-                                  ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                                  ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                                   : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                               }`}
                             >
@@ -3180,21 +3400,24 @@ export default function ChatApp() {
           <div
             ref={messagesScrollRef}
             onScroll={(e) => {
+              // Ignore scrolls we caused ourselves
+              if (isProgrammaticScrollRef.current) return;
+
               const el = e.currentTarget;
-              const awayFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 150;
-              const previousTop = lastScrollTopRef.current;
-              const scrollingUp = el.scrollTop < previousTop - 2;
+              const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+              const atBottom = distFromBottom < 40;
+              const scrollingUp = el.scrollTop < lastScrollTopRef.current - 2;
               lastScrollTopRef.current = el.scrollTop;
 
-              setShowScrollDown(awayFromBottom);
+              setShowScrollDown(!atBottom);
 
-              // Lock only when user intentionally scrolls up during a live stream.
-              if (isStreaming && awayFromBottom && scrollingUp && autoScrollEnabled && e.nativeEvent?.isTrusted) {
+              if (scrollingUp) {
+                // User scrolled up — pause auto-scroll
+                autoScrollRef.current = false;
                 setAutoScrollEnabled(false);
-              }
-
-              // Resume follow mode automatically once user returns to bottom.
-              if (!awayFromBottom && !autoScrollEnabled) {
+              } else if (atBottom) {
+                // User reached bottom — resume auto-scroll
+                autoScrollRef.current = true;
                 setAutoScrollEnabled(true);
               }
             }}
@@ -3257,6 +3480,7 @@ export default function ChatApp() {
                 message={message}
                 isLast={idx === messages.length - 1}
                 isStreaming={isStreaming}
+                streamingLabel={streamingLabel}
                 speakingMessageId={speakingMessageId}
                 isSpeaking={isSpeaking}
                 voiceEngine={voiceEngine}
@@ -3371,7 +3595,7 @@ export default function ChatApp() {
                           }}
                           className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
                             provider === opt.id
-                              ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                               : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                           }`}
                         >
@@ -3443,7 +3667,7 @@ export default function ChatApp() {
                       <button
                         type="button"
                         onClick={() => { setIsProviderConfigOpen(false); setStatusText('Provider configured'); }}
-                        className="flex-1 rounded-lg bg-accentSoft px-2 py-1 text-xs font-medium text-ink transition hover:opacity-80"
+                        className="flex-1 rounded-lg bg-accentSoft px-2 py-1 text-xs font-medium text-ink transition hover:opacity-80 dark:bg-accent/20 dark:text-accent"
                       >
                         Done
                       </button>
@@ -3461,8 +3685,9 @@ export default function ChatApp() {
                     className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="Choose model"
                   >
-                    <span className="max-w-[9rem] truncate">{selectedModelRecord?.label || model}</span>
-                    {selectedModelRecord?.paramSize ? <span className="shrink-0 opacity-50"> ({selectedModelRecord.paramSize})</span> : null}
+                    <span className="max-w-[9rem] truncate">
+                        {model === 'auto' ? 'Auto' : (selectedModelRecord?.label || model)}
+                      </span>
                     <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
                       <path d="M5.25 7.5L10 12.25 14.75 7.5" />
                     </svg>
@@ -3471,7 +3696,31 @@ export default function ChatApp() {
                   {isModelMenuOpen && (
                   <div data-menu-panel="model" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
                       {models.length > 0 ? (
-                        Array.from(new Set(models.map((item) => item.group || 'Models'))).map((group) => (
+                        <>
+                        {/* Auto mode entry — no group header, divider separates it from model groups */}
+                        <div className="group/row relative flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => { setModel('auto'); setIsModelMenuOpen(false); }}
+                            className={`flex min-w-0 flex-1 items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                              model === 'auto'
+                                ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                                : 'font-medium text-slate-800 hover:bg-black/5 dark:text-slate-100 dark:hover:bg-white/10'
+                            }`}
+                          >
+                            <span className="flex min-w-0 items-center gap-1.5 truncate">
+                              {model === 'auto'
+                                ? <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                                : <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />}
+                              <span className="truncate font-semibold">Auto</span>
+                            </span>
+                            <span className="ml-2 shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                              {pickBestAutoModel(models) ? `→ ${pickBestAutoModel(models).label}` : 'no model installed'}
+                            </span>
+                          </button>
+                        </div>
+                        <div className="my-1 border-t border-black/10 dark:border-white/10" />
+                        {Array.from(new Set(models.map((item) => item.group || 'Models'))).map((group) => (
                           <div key={group} className="mb-1 last:mb-0">
                             <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group}</div>
                             {models
@@ -3521,7 +3770,7 @@ export default function ChatApp() {
                                   }}
                                   className={`flex min-w-0 flex-1 items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
                                     isSelected
-                                      ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                                      ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                                       : isInstalled
                                       ? 'font-medium text-slate-800 hover:bg-black/5 dark:text-slate-100 dark:hover:bg-white/10'
                                       : 'text-slate-400 hover:bg-black/5 dark:text-slate-500 dark:hover:bg-white/5'
@@ -3539,7 +3788,6 @@ export default function ChatApp() {
                                     )}
                                     <span className="truncate">
                                       {item.label}
-                                      {item.paramSize ? <span className="ml-1 opacity-50">({item.paramSize})</span> : null}
                                     </span>
                                   </span>
                                   {pulling ? (
@@ -3562,11 +3810,15 @@ export default function ChatApp() {
                                         title="Cancel install"
                                       >✕</button>
                                     </div>
-                                  ) : !isInstalled ? (
-                                    <span className="ml-2 shrink-0 text-[10px] italic text-slate-400 dark:text-slate-500">
-                                      {provider === 'ollama' ? (item.size ? item.size : '+ install') : 'load externally'}
+                                  ) : (
+                                    <span className="ml-2 shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                                      {isInstalled
+                                        ? (item.paramSize || '')
+                                        : provider === 'ollama'
+                                          ? (item.size || '+ install')
+                                          : 'load externally'}
                                     </span>
-                                  ) : null}
+                                  )}
                                 </button>
                                 {canDelete && (
                                   <button
@@ -3583,7 +3835,8 @@ export default function ChatApp() {
                                 );
                               })}
                                 </div>
-                        ))
+                        ))}
+                        </>
                       ) : (
                         <div className="px-2 py-2 text-xs text-slate-500">No models found</div>
                       )}
@@ -3593,7 +3846,10 @@ export default function ChatApp() {
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Generation</div>
                       <div className="mb-1.5">
                         <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-                          <span>Temperature</span>
+                          <span className="flex items-center gap-1">
+                            Temperature
+                            <span title="Controls randomness. 0 = precise and deterministic. 0.7 = balanced (default). 1+ = more creative but less predictable." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-slate-400 dark:border-slate-600 dark:text-slate-500">?</span>
+                          </span>
                           <span>{temperature == null ? 'default' : temperature.toFixed(2)}</span>
                         </div>
                         <input
@@ -3616,7 +3872,10 @@ export default function ChatApp() {
                         )}
                       </div>
                       <div>
-                        <div className="mb-0.5 text-[10px] text-slate-500 dark:text-slate-400">Max tokens</div>
+                        <div className="mb-0.5 flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          Max tokens
+                          <span title="Hard cap on reply length. Leave blank to let the model stop naturally. Set a number (e.g. 512) to limit response length." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-slate-400 dark:border-slate-600 dark:text-slate-500">?</span>
+                        </div>
                         <input
                           type="number"
                           min="1"
@@ -3657,7 +3916,7 @@ export default function ChatApp() {
                         }}
                         className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           trainingMode === 'off'
-                            ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                             : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                         }`}
                       >
@@ -3672,7 +3931,7 @@ export default function ChatApp() {
                         }}
                         className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           trainingMode === 'fine-tuning'
-                            ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                             : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                         }`}
                       >
@@ -3771,7 +4030,7 @@ export default function ChatApp() {
                         }}
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           deepWebEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                             : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                         }`}
                       >
@@ -3786,7 +4045,7 @@ export default function ChatApp() {
                         }}
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           canvasEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                             : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                         }`}
                       >
@@ -3801,7 +4060,7 @@ export default function ChatApp() {
                         }}
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           guidedLearningEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                             : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                         }`}
                       >
@@ -3816,7 +4075,7 @@ export default function ChatApp() {
                         }}
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           deepThinkingEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                             : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                         }`}
                       >
@@ -3868,7 +4127,7 @@ export default function ChatApp() {
                                 key={t}
                                 type="button"
                                 onClick={() => setRemoteType(t)}
-                                className={`flex-1 rounded-lg px-2 py-1 text-[11px] font-medium transition ${remoteType === t ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink' : 'border border-black/10 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10'}`}
+                                className={`flex-1 rounded-lg px-2 py-1 text-[11px] font-medium transition ${remoteType === t ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-black/10 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10'}`}
                               >{t === 'local' ? 'Localhost' : 'SSH'}</button>
                             ))}
                           </div>
@@ -3905,7 +4164,7 @@ export default function ChatApp() {
                                     key={a}
                                     type="button"
                                     onClick={() => setRemoteAuthType(a)}
-                                    className={`flex-1 rounded-lg px-1 py-0.5 text-[10px] font-medium transition capitalize ${remoteAuthType === a ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink' : 'border border-black/10 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:text-slate-300'}`}
+                                    className={`flex-1 rounded-lg px-1 py-0.5 text-[10px] font-medium transition capitalize ${remoteAuthType === a ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-black/10 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:text-slate-300'}`}
                                   >{a}</button>
                                 ))}
                               </div>
@@ -4275,7 +4534,7 @@ export default function ChatApp() {
                   disabled={!dictationSupported || isStreaming}
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     isDictating
-                      ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accentSoft dark:text-ink'
+                      ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
                       : 'border-black/10 bg-white/85 text-slate-500 hover:bg-black/5 hover:text-slate-700 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-slate-100'
                   }`}
                   title={dictationSupported ? (isDictating ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported in this browser'}
@@ -4341,7 +4600,7 @@ export default function ChatApp() {
                   }}
                   className={`inline-flex h-8 w-full items-center justify-center rounded-full border text-[10px] font-semibold tracking-wide transition ${
                     isSpeaking
-                      ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accentSoft dark:text-ink'
+                      ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
                       : 'border-black/10 bg-white/80 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10'
                   }`}
                   title="Voice settings"
@@ -4369,7 +4628,7 @@ export default function ChatApp() {
                         onClick={() => setAutoSpeakEnabled((prev) => !prev)}
                         className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition ${
                           autoSpeakEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                             : 'border border-black/10 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10'
                         }`}
                       >
@@ -4392,14 +4651,14 @@ export default function ChatApp() {
                         <button
                           type="button"
                           onClick={() => setVoiceEngine('browser')}
-                          className={`flex-1 px-2 py-1.5 text-[10px] font-medium transition ${voiceEngine === 'browser' ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink' : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'}`}
+                          className={`flex-1 px-2 py-1.5 text-[10px] font-medium transition ${voiceEngine === 'browser' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'}`}
                         >
                           Browser
                         </button>
                         <button
                           type="button"
                           onClick={() => setVoiceEngine('piper')}
-                          className={`flex-1 border-l border-black/10 px-2 py-1.5 text-[10px] font-medium transition dark:border-white/20 ${voiceEngine === 'piper' ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink' : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'}`}
+                          className={`flex-1 border-l border-black/10 px-2 py-1.5 text-[10px] font-medium transition dark:border-white/20 ${voiceEngine === 'piper' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'}`}
                         >
                           Piper neural
                         </button>
@@ -4524,32 +4783,26 @@ export default function ChatApp() {
           </footer>
 
           {(showScrollDown || !autoScrollEnabled) && (
-            <div className="absolute bottom-28 right-5 z-20 flex items-center gap-2">
+            <div className="pointer-events-none absolute bottom-28 left-0 right-0 z-20 flex justify-center">
               <button
                 type="button"
-                onClick={() => setAutoScrollEnabled((prev) => !prev)}
-                className={`inline-flex h-9 items-center justify-center rounded-full border px-3 text-[11px] font-semibold shadow-[0_10px_24px_-16px_rgba(15,23,42,0.55)] transition ${autoScrollEnabled ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}
-                title={autoScrollEnabled ? 'Auto-scroll is ON (click to lock position)' : 'Auto-scroll is OFF (click to follow new messages)'}
-                aria-label={autoScrollEnabled ? 'Disable auto-scroll' : 'Enable auto-scroll'}
+                onClick={() => {
+                  const el = messagesScrollRef.current;
+                  if (!el) return;
+                  autoScrollRef.current = true;
+                  setAutoScrollEnabled(true);
+                  setShowScrollDown(false);
+                  isProgrammaticScrollRef.current = true;
+                  lastScrollTopRef.current = el.scrollHeight; // set baseline to destination now
+                  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                  setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
+                }}
+                className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-accent/30 bg-accentSoft px-3 text-[11px] font-semibold text-ink shadow-[0_4px_16px_-4px_rgba(15,23,42,0.18)] backdrop-blur-sm transition hover:bg-accent/20 dark:border-accent/30 dark:bg-accent/15 dark:text-accent dark:hover:bg-accent/25"
+                title="Jump to latest messages"
+                aria-label="Scroll to bottom"
               >
-                {autoScrollEnabled ? 'Auto' : 'Locked'}
+                {isStreaming && !autoScrollEnabled ? 'New messages ↓' : '↓'}
               </button>
-              {showScrollDown && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!messagesScrollRef.current) return;
-                    messagesScrollRef.current.scrollTo({ top: messagesScrollRef.current.scrollHeight, behavior: 'smooth' });
-                    setShowScrollDown(false);
-                    setAutoScrollEnabled(true);
-                  }}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-white/90 text-slate-700 shadow-[0_10px_24px_-16px_rgba(15,23,42,0.55)] transition hover:bg-white dark:border-white/20 dark:bg-slate-900/80 dark:text-slate-200"
-                  title="Scroll to bottom"
-                  aria-label="Scroll to bottom"
-                >
-                  ↓
-                </button>
-              )}
             </div>
           )}
         </section>
@@ -4557,7 +4810,7 @@ export default function ChatApp() {
       <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-slate-700/90 dark:text-slate-300/90">
         Mirabilis AI by Moshiko Nayman
         <span className="mx-1.5 opacity-40">·</span>
-        <span className="opacity-55">v26.2R1</span>
+        <span className="opacity-55">v26.3R1-S3</span>
       </footer>
     </main>
   );

@@ -7,8 +7,8 @@ module.exports = {
       colors: {
         ink: '#0b1220',
         mist: '#edf4ff',
-        accent: '#1aa86f',
-        accentSoft: '#dcfce7'
+        accent: 'var(--accent)',
+        accentSoft: 'var(--accent-soft)'
       }
     }
   },

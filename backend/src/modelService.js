@@ -10,9 +10,16 @@ const CURATED_OLLAMA_MODELS = [
   { id: 'llama3.1',       label: 'Llama 3.1',         group: 'Lightweight', ollamaId: 'llama3.1',         size: '4.7 GB' },
   { id: 'mistral',        label: 'Mistral 7B',         group: 'Lightweight', ollamaId: 'mistral',          size: '4.1 GB' },
   { id: 'qwen2.5',        label: 'Qwen 2.5',           group: 'Lightweight', ollamaId: 'qwen2.5',          size: '4.7 GB' },
-  { id: 'gemma3',         label: 'Gemma 3',            group: 'Lightweight', ollamaId: 'gemma3',           size: '3.3 GB' },
+  { id: 'gemma4:e2b',     label: 'Gemma 4 E2B',        group: 'Lightweight', ollamaId: 'gemma4:e2b',       size: '7.2 GB' },
+  { id: 'gemma4:e4b',     label: 'Gemma 4 E4B',        group: 'Lightweight', ollamaId: 'gemma4:e4b',       size: '9.6 GB' },
+  { id: 'gemma3:1b',      label: 'Gemma 3 1B',         group: 'Lightweight', ollamaId: 'gemma3:1b',        size: '815 MB' },
+  { id: 'gemma3',         label: 'Gemma 3 4B',         group: 'Lightweight', ollamaId: 'gemma3',           size: '3.3 GB' },
   { id: 'phi4',           label: 'Phi-4',              group: 'Lightweight', ollamaId: 'phi4',             size: '9.1 GB' },
   // Powerful models — need more RAM/VRAM
+  { id: 'gemma4:26b',     label: 'Gemma 4 26B',        group: 'Powerful',    ollamaId: 'gemma4:26b',       size: '18 GB'  },
+  { id: 'gemma4:31b',     label: 'Gemma 4 31B',        group: 'Powerful',    ollamaId: 'gemma4:31b',       size: '20 GB'  },
+  { id: 'gemma3:12b',     label: 'Gemma 3 12B',        group: 'Powerful',    ollamaId: 'gemma3:12b',       size: '8.0 GB' },
+  { id: 'gemma3:27b',     label: 'Gemma 3 27B',        group: 'Powerful',    ollamaId: 'gemma3:27b',       size: '17 GB'  },
   { id: 'qwen3',          label: 'Qwen 3',             group: 'Powerful',    ollamaId: 'qwen3',            size: '5.2 GB' },
   { id: 'deepseek-r1',    label: 'DeepSeek R1',        group: 'Powerful',    ollamaId: 'deepseek-r1',      size: '4.7 GB' },
   { id: 'deepseek-v3',    label: 'DeepSeek V3',        group: 'Powerful',    ollamaId: 'deepseek-v3',      size: '404 GB' },
@@ -23,11 +30,11 @@ const CURATED_OLLAMA_MODELS = [
   { id: 'jamba',          label: 'Jamba (AI21)',       group: 'Powerful',    ollamaId: 'jamba',            size: '52 GB' },
   { id: 'dbrx',           label: 'DBRX',               group: 'Powerful',    ollamaId: 'dbrx',             size: '74 GB' },
   // Uncensored / less-restricted community models
-  { id: 'dolphin3',                label: 'Dolphin 3.0',                      group: 'Uncensored', ollamaId: 'dolphin3',                      size: '4.7 GB' },
-  { id: 'dolphin-mixtral',         label: 'Mixtral 8x7B (Uncensored)',        group: 'Uncensored', ollamaId: 'dolphin-mixtral:8x7b',          size: '26 GB'  },
-  { id: 'deepseek-r1-abliterated', label: 'DeepSeek R1 Distill (Abliterated)', group: 'Uncensored', ollamaId: 'deepseek-r1-abliterated',       size: '4.7 GB' },
-  { id: 'qwen3.5-uncensored',      label: 'Qwen 3.5 Uncensored',             group: 'Uncensored', ollamaId: 'qwen3.5-uncensored',            size: '4.7 GB' },
-  { id: 'llama4.1',                label: 'Llama 4.1 Surge',                 group: 'Uncensored', ollamaId: 'llama4.1:surge',                size: '55 GB'  },
+  { id: 'dolphin3',                label: 'Dolphin 3.0',        group: 'Uncensored', ollamaId: 'dolphin3',                size: '4.7 GB' },
+  { id: 'dolphin-mixtral',         label: 'Mixtral 8x7B',       group: 'Uncensored', ollamaId: 'dolphin-mixtral:8x7b',    size: '26 GB'  },
+  { id: 'deepseek-r1-abliterated', label: 'DeepSeek R1 Distill', group: 'Uncensored', ollamaId: 'deepseek-r1-abliterated', size: '4.7 GB' },
+  { id: 'qwen3.5-uncensored',      label: 'Qwen 3.5',           group: 'Uncensored', ollamaId: 'qwen3.5-uncensored',      size: '4.7 GB' },
+  { id: 'llama4.1',                label: 'Llama 4.1 Surge',    group: 'Uncensored', ollamaId: 'llama4.1:surge',          size: '55 GB'  },
 ];
 
 // All valid pull targets — used by the pull endpoint to whitelist requests
@@ -93,14 +100,27 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
     let matchedRemote = null;
     let matchedLocal = null;
 
+    // If this entry targets a specific version tag (e.g. gemma3:1b, gemma4:e2b),
+    // require the remote id to contain the full versioned tag — not just the base name.
+    // This prevents gemma3:latest (4B) from being mistaken as gemma3:1b (1B).
+    const ollamaId = entry.ollamaId || '';
+    const ollamaHasSpecificTag = ollamaId.includes(':') && !ollamaId.endsWith(':latest');
+    const specificTagNeedle = ollamaHasSpecificTag ? normalizeCatalogNeedle(ollamaId) : null;
+
     for (const [remoteId, remote] of remoteById.entries()) {
+      // Skip remotes already claimed by an earlier catalog entry (e.g. gemma3:1b
+      // must not also satisfy the untagged gemma3 entry).
+      if (!unmatchedRemoteIds.has(remoteId)) continue;
       const remoteNeedle = normalizeCatalogNeedle(remoteId);
       const base = normalizeCatalogNeedle(normalizeModelId(remoteId));
-      if (
-        remoteNeedle.includes(normalizeCatalogNeedle(normalizeModelId(entry.id))) ||
-        remoteNeedle.includes(normalizeCatalogNeedle(normalizeModelId(entry.ollamaId || ''))) ||
-        (entryNeedle && base && entryNeedle.includes(base))
-      ) {
+      const matched = specificTagNeedle
+        ? remoteNeedle === specificTagNeedle || remoteNeedle.startsWith(specificTagNeedle + ' ')
+        : (
+          remoteNeedle.includes(normalizeCatalogNeedle(normalizeModelId(entry.id))) ||
+          remoteNeedle.includes(normalizeCatalogNeedle(normalizeModelId(ollamaId))) ||
+          (entryNeedle && base && entryNeedle.includes(base))
+        );
+      if (matched) {
         matchedRemote = remote;
         unmatchedRemoteIds.delete(remoteId);
         break;
@@ -254,9 +274,13 @@ export async function listModels(config, provider = config.aiProvider, options =
   const discoveredModels = await listOllamaModels(config.ollamaBaseUrl);
   const discoveredSet = new Set(discoveredModels.map((m) => m.name));
   const discoveredBaseSet = new Set(discoveredModels.map((m) => normalizeModelId(m.name)));
-  const paramSizeMap = {};
+  // Two param maps: exact full name (e.g. 'gemma3:latest') and base name (e.g. 'gemma3')
+  const paramSizeExact = {};
+  const paramSizeBase = {};
   for (const m of discoveredModels) {
-    paramSizeMap[normalizeModelId(m.name)] = m.paramSize;
+    paramSizeExact[m.name] = m.paramSize;
+    const base = normalizeModelId(m.name);
+    if (!paramSizeBase[base]) paramSizeBase[base] = m.paramSize;
   }
   const curatedBaseSet = new Set(
     CURATED_OLLAMA_MODELS.flatMap((m) => [
@@ -266,15 +290,28 @@ export async function listModels(config, provider = config.aiProvider, options =
   );
   const curated = CURATED_OLLAMA_MODELS.map((model) => {
     const pullId = model.ollamaId || model.id;
-    const isAvailable =
-      discoveredSet.has(model.id) ||
-      discoveredSet.has(pullId) ||
-      discoveredBaseSet.has(normalizeModelId(model.id)) ||
-      discoveredBaseSet.has(normalizeModelId(pullId));
-    const paramSize =
-      paramSizeMap[normalizeModelId(model.id)] ||
-      paramSizeMap[normalizeModelId(pullId)] ||
-      null;
+    // If the ollamaId has a specific non-default tag (e.g. gemma3:1b, gemma3:12b, gemma4:e2b),
+    // ONLY match if that exact tag is present in the discovered set.
+    // This prevents gemma3:latest from satisfying gemma3:1b just because both share base name 'gemma3'.
+    const hasSpecificTag = pullId.includes(':') && !pullId.endsWith(':latest');
+    let isAvailable;
+    let paramSize;
+    if (hasSpecificTag) {
+      isAvailable = discoveredSet.has(pullId) || discoveredSet.has(model.id);
+      paramSize = paramSizeExact[pullId] || paramSizeExact[model.id] || null;
+    } else {
+      isAvailable =
+        discoveredSet.has(model.id) ||
+        discoveredSet.has(pullId) ||
+        discoveredBaseSet.has(normalizeModelId(model.id)) ||
+        discoveredBaseSet.has(normalizeModelId(pullId));
+      paramSize =
+        paramSizeExact[model.id] ||
+        paramSizeExact[pullId] ||
+        paramSizeBase[normalizeModelId(model.id)] ||
+        paramSizeBase[normalizeModelId(pullId)] ||
+        null;
+    }
     return {
       ...model,
       available: isAvailable,
