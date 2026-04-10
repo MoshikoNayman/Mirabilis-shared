@@ -108,6 +108,37 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+// ── Smart web-search classifier ───────────────────────────────────────────────
+// Returns 'search' when the query clearly needs live/current data,
+// or 'skip' for everything that can be answered from training knowledge.
+function classifyWebSearch(text) {
+  const t = text.toLowerCase();
+
+  // Hard skip — pure generation / writing tasks that gain nothing from web context
+  const skipPatterns = [
+    /\b(write|draft|compose|summarise?|summarize|translate|generate|create|draw|code|fix|debug|refactor|improve|proofread|rewrite|convert|calculate|solve)\b/,
+  ];
+  const hasSkipVerb = skipPatterns.some((r) => r.test(t));
+
+  // Live / real-time signals — always search regardless of skip verbs
+  const liveSignals = [
+    /\b(today|tonight|right now|currently|at the moment|this week|this month|this year|yesterday|latest|recent|new|breaking|live|happening)\b/,
+    /\b(news|headline|stock|price|weather|forecast|score|result|standings|match|game|election|vote|poll|winner|champion)\b/,
+    /\b(who (is|are|won|leads?|runs?|owns?)|what('s| is) (the )?(?:current|latest|new|best|top)|when (is|does|will|did))\b/,
+    /\b(2025|2026|2027)\b/,
+    /\b(release|launch|announce|update|version) .{0,30}(when|date|out|available|coming)\b/,
+    /https?:\/\//,
+    // capability / internet-connectivity checks
+    /\b(check|test|verify|is .{0,20} (working|available|online|down|up)|can you (access|reach|fetch|browse|search))\b/,
+  ];
+  const hasLiveSignal = liveSignals.some((r) => r.test(t));
+
+  if (hasLiveSignal) return 'search';
+  if (hasSkipVerb) return 'skip';
+  // Default to search when www is on — let the AI decide if the context is useful
+  return 'search';
+}
+
 function formatTime(value) {
   const date = new Date(value);
   const now = new Date();
@@ -377,9 +408,20 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
       const lang = (className || '').replace('language-', '') || '';
       const displayLang = lang || 'code';
       const codeText = String(children).replace(/\n$/, '');
-      if (inline) {
+      // react-markdown v9+ no longer passes `inline` prop — detect it ourselves:
+      // inline code has no language class and no newlines inside it.
+      const isInline = inline || (!className?.includes('language-') && !codeText.includes('\n'));
+      if (isInline) {
         return (
-          <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[0.82em] dark:bg-white/15" {...props}>
+          <code
+            className="rounded-md border px-1 py-0.5 font-mono text-[0.82em]"
+            style={{
+              background: 'var(--accent-soft)',
+              borderColor: 'color-mix(in srgb, var(--accent) 30%, transparent)',
+              color: 'var(--accent)',
+            }}
+            {...props}
+          >
             {children}
           </code>
         );
@@ -387,7 +429,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
       // Unique key for this code block within this message
       const blockKey = `${message?.id || 'msg'}-${displayLang}-${codeText.slice(0, 40)}`;
       const execResult = execResultsRef.current[blockKey];
-      const canRun = !inline && isShellLang(lang) && remoteConnectedRef.current;
+      const canRun = !isInline && isShellLang(lang) && remoteConnectedRef.current;
 
       return (
         <figure className="relative overflow-clip rounded-xl border" style={{ background: 'var(--code-bg)', borderColor: 'var(--code-border)', color: 'var(--code-text)' }}>
@@ -870,8 +912,14 @@ export default function ChatApp() {
   const [piperModels, setPiperModels] = useState([]);
   const [downloadingPiperModelId, setDownloadingPiperModelId] = useState(null);
   const [isDragOverChat, setIsDragOverChat] = useState(false);
-  const [deepWebEnabled, setDeepWebEnabled] = useState(false);
-  const [webSearchStatus, setWebSearchStatus] = useState('off');
+  const [deepWebEnabled, setDeepWebEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem('local-ai-deep-web-enabled');
+      return saved === null ? true : saved === 'true'; // default ON
+    }
+    return true;
+  });
+  const [webSearchStatus, setWebSearchStatus] = useState('idle'); // 'idle' | 'searching' | 'error'
   // modelId → { pct: number|null, status: string, ctrl: AbortController } while pulling
   const [pullingModels, setPullingModels] = useState({});
   // modelId → true while a delete request is in-flight
@@ -972,10 +1020,7 @@ export default function ChatApp() {
     if (savedModel) {
       setModel(savedModel);
     }
-    if (savedDeepWeb === 'true') {
-      setDeepWebEnabled(true);
-      setWebSearchStatus('ready');
-    }
+    // deepWebEnabled already restored via lazy useState initialiser above
     if (savedCanvasEnabled === 'true') {
       setCanvasEnabled(true);
     }
@@ -1354,7 +1399,7 @@ export default function ChatApp() {
 
   useEffect(() => {
     window.localStorage.setItem('local-ai-deep-web-enabled', String(deepWebEnabled));
-    setWebSearchStatus(deepWebEnabled ? 'ready' : 'off');
+    if (!deepWebEnabled) setWebSearchStatus('idle');
   }, [deepWebEnabled]);
 
   useEffect(() => {
@@ -2796,7 +2841,7 @@ export default function ChatApp() {
       ].join(' ');
       outboundContent = `${outboundContent}\n\n[System: ${disclaimer}]`;
     }
-    if (deepWebEnabled) {
+    if (deepWebEnabled && classifyWebSearch(content) === 'search') {
       setStatusText('Searching the web...');
       setWebSearchStatus('searching');
       try {
@@ -2819,13 +2864,18 @@ export default function ChatApp() {
             '',
             answerHint + context
           ].join('\n');
-          setWebSearchStatus('ready');
+          setWebSearchStatus('idle');
         } else {
-          setWebSearchStatus('no-results');
+          // Search succeeded but no results — treat as soft error
+          setWebSearchStatus('error');
+          setTimeout(() => setWebSearchStatus('idle'), 4000);
         }
       } catch (error) {
-        setWebSearchStatus('error');
         setStatusText(`Web search unavailable: ${error.message}`);
+        setWebSearchStatus('error');
+        setTimeout(() => setWebSearchStatus('idle'), 4000);
+      } finally {
+        setStatusText('Streaming response...');
       }
     }
 
@@ -3269,9 +3319,6 @@ export default function ChatApp() {
                           />
                         )}
                         <span className="relative">{item.label}</span>
-                        {isActive && (
-                          <span className="relative inline-block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse dark:bg-green-500" aria-hidden="true" />
-                        )}
                       </button>
                       {openHardwarePopover === key && item.expanded ? (
                         <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 text-[11px] text-slate-600 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95 dark:text-slate-300">
@@ -3283,6 +3330,32 @@ export default function ChatApp() {
                     </div>
                   );
                 })}
+
+                {/* web search chip — fixed width so it never grows when searching */}
+                <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setDeepWebEnabled((v) => !v)}
+                  title={
+                    webSearchStatus === 'error'
+                      ? 'Web search failed — results unavailable'
+                      : deepWebEnabled
+                      ? 'Web search on — click to disable'
+                      : 'Web search off — click to enable'
+                  }
+                  className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                    webSearchStatus === 'searching'
+                      ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
+                      : webSearchStatus === 'error'
+                      ? 'border-red-400/60 bg-red-50/80 text-red-600 dark:border-red-500/40 dark:bg-red-900/20 dark:text-red-400'
+                      : deepWebEnabled
+                      ? 'border-black/10 bg-white/80 text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300'
+                      : 'border-black/10 bg-white/80 text-slate-400 opacity-50 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-500'
+                  }`}
+                >
+                  <span className="relative">www</span>
+                </button>
+                </div>
 
                 {/* context + engine — right */}
                 <div className="ml-auto flex flex-nowrap items-center gap-1.5">
@@ -3298,9 +3371,6 @@ export default function ChatApp() {
                     title="Toggle instructions visibility"
                   >
                     <span>Instructions</span>
-                    <span className={`inline-block h-1.5 w-1.5 rounded-full transition-colors ${
-                      isSystemPromptVisible ? 'bg-accent dark:bg-green-400' : 'bg-slate-400 dark:bg-slate-500'
-                    }`} aria-hidden="true" />
                   </button>
                   </div>
                   <div data-menu-container="true" className="relative">
@@ -4029,21 +4099,7 @@ export default function ChatApp() {
                         <span>Create Image</span>
                         <span className="text-[10px] opacity-70">{imageServiceAvailable ? imageServiceDevice || 'ready' : 'offline'}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeepWebEnabled((prev) => !prev);
-                          setIsToolsMenuOpen(false);
-                        }}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          deepWebEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
-                        }`}
-                      >
-                        <span>Deep Web Search</span>
-                        <span className="text-[10px] opacity-70">{deepWebEnabled ? webSearchStatus : 'off'}</span>
-                      </button>
+
                       <button
                         type="button"
                         onClick={() => {
@@ -4481,11 +4537,6 @@ export default function ChatApp() {
               </div>
 
               <div className="flex flex-wrap justify-end gap-1.5">
-                {deepWebEnabled && (
-                  <span className="rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300">
-                    Web {webSearchStatus}
-                  </span>
-                )}
                 {deepThinkingEnabled && (
                   <span className="rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300">
                     Deep Thinking

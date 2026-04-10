@@ -104,7 +104,13 @@ export function deleteChat(filePath, chatId) {
 
 export function clearChats(filePath) {
   return withLock(async () => {
-    _epoch++; // invalidate all in-flight saveCha calls
+    _epoch++; // invalidate all in-flight saveChat calls
     await writeStore(filePath, { ...emptyStore });
   });
+}
+
+// Returns the current epoch so callers can detect if clearChats ran since they
+// last checked.
+export function getEpoch() {
+  return _epoch;
 }
