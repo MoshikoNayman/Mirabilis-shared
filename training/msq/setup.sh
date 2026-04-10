@@ -21,10 +21,17 @@ create() {
   echo "  ┌─ $name"
   echo "  │  Base : $base  ($size)"
   printf "  │  Status : "
-  if ollama create "$name" -f "$DIR/$file" 2>&1 | tail -1 | grep -q "success\|created\|exists"; then
+  local out
+  if out=$(ollama create "$name" -f "$DIR/$file" 2>&1); then
     echo "ready"
   else
-    ollama create "$name" -f "$DIR/$file"
+    echo "FAILED"
+    echo ""
+    echo "$out"
+    echo ""
+    echo "  ✗  Could not create $name. Is the base model pulled? Try:"
+    echo "     ollama pull $base"
+    exit 1
   fi
   echo "  └─ done"
 }
