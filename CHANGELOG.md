@@ -4,6 +4,42 @@ Versioning follows Junos-style tags.
 
 ## [26.3R1-S3] — 2026-04-10
 
+### MSQ Model Family
+
+- **MSQ-1** — fast, minimal daily-driver tuned on `gemma3` (3.3 GB), 8 192-token context.
+- **MSQ-X** — deep-reasoning variant tuned on `gemma3:12b` (8.1 GB), 32 768-token context.
+- **MSQ-Noir** — fully unrestricted variant tuned on `dolphin3` (4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
+- `training/msq/` directory added — contains `Modelfile.msq-1`, `Modelfile.msq-x`, `Modelfile.msq-noir`, and `setup.sh` (`bash training/msq/setup.sh` creates all three models via `ollama create`).
+- MSQ group registered at the top of `CURATED_OLLAMA_MODELS` in `modelService.js` so models appear first in the model selector.
+
+### Uncensored Mode Hardening
+
+- `UNCENSORED_DIRECTIVE` is now `unshift`-ed to array position 0 in the system-prompt chain, overriding any earlier instructions.
+- Platform-context confidentiality rules 3–5 are excluded when `chatUncensoredMode` is `true`, preventing them from silently suppressing the uncensored directive.
+- `isUncensoredModelRecord` pattern in `server.js` extended to match the `msq-noir` model ID.
+
+### Web Search (www Chip)
+
+- Replaced the dead DuckDuckGo instant-answer endpoint with a direct RSS-feed parser.  Sources: Fox News, BBC, CNN, Reuters, AP, New York Times, The Guardian, TechCrunch, The Verge.
+- Web search capability description added to platform context so the model can reference fetched results in its response.
+- `webSearchStatus` now has an `'error'` state (red chip shown for 4 s on failure) in addition to `'idle'` and `'searching'`.
+- `classifyWebSearch` default changed from `'skip'` to `'search'`; skip is now reserved for pure write/code-only verbs.
+
+### Inline Code Rendering Fix
+
+- `react-markdown` v10 dropped the `inline` boolean prop from the `code` component. Detection now uses absence of a `language-*` class and no newlines in the string instead.
+- `canRun` guard in `ChatApp.jsx` updated to use `isInline` (was the now-undefined `inline` prop, which caused all backtick spans to render as full block elements).
+- Inline code spans now use `var(--accent-soft)` background, `var(--accent)` border, and `var(--accent)` text colour so they follow the active palette.
+
+### Bug Fix — Clear-All Chat Resurrection
+
+- `getEpoch()` added to `chatStore.js` and imported in `server.js`.
+- `server.js` title-generation (`titleGenPromise`) now snapshots `requestEpoch` at request time and aborts the deferred `saveChat` write if `clearChats` ran in the interim, preventing cleared chats from being recreated.
+
+### Chip / Toolbar Polish
+
+- All left-side toolbar chips (`compute`, `npu`, `www`, `Instructions`) now use identical structure: text label only, no decorative dot.
+
 ### UI Polish & Styling Session
 
 - **4-scheme palette system** — Mirabilis (green), Dusk (indigo/violet), Ember (warm amber), Summit (Apple blue). Replaces hardcoded accent values with CSS custom properties; Tailwind `accent`/`accentSoft` tokens now resolve from CSS vars, so all components update automatically on scheme switch.

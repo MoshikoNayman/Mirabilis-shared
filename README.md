@@ -50,10 +50,33 @@ frontend/       Next.js UI
 backend/        Express API + provider adapters
 image-service/  Local image generation service
 providers/      Local runtime binaries (llama-server, koboldcpp)
+training/msq/   MSQ model family — Modelfiles and setup script
 install.sh      One-time setup
 run.sh          Unified launcher and stop command
 uninstall.sh    Cleanup script
 ```
+
+## MSQ Model Family
+
+MSQ is the native Mirabilis model family built on top of publicly available base models and tuned for use with this app.
+
+| Model | Base | Context | Character |
+|-------|------|---------|-----------|
+| **MSQ-1** | gemma3 (3.3 GB) | 8 192 | Fast, direct, minimal. Daily driver. |
+| **MSQ-X** | gemma3:12b (8.1 GB) | 32 768 | Thorough, deep reasoning. No ceiling. |
+| **MSQ-Noir** | dolphin3 (4.9 GB) | 8 192 | Fully unrestricted. No safety filters. |
+
+### Setup
+
+Requires Ollama. Run once to create all three models:
+
+```bash
+bash training/msq/setup.sh
+```
+
+Models will appear in the **MSQ** group at the top of the model selector after setup.
+
+> **MSQ-Noir** disables all content filters. Use responsibly and only on hardware you control.
 
 ## Notes
 
