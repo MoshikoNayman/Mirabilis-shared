@@ -79,7 +79,7 @@ function isUncensoredModelRecord(item) {
   return (
     String(item?.group || '').toLowerCase() === 'uncensored' ||
     item?.uncensored === true ||
-    /uncensored|dolphin|abliterated|surge|msq-noir/.test(haystack)
+    /uncensored|dolphin|abliterated|surge|msq-raw/.test(haystack)
   );
 }
 

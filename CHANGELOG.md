@@ -6,17 +6,17 @@ Versioning follows Junos-style tags.
 
 ### MSQ Model Family
 
-- **MSQ-1** — fast, minimal daily-driver tuned on `gemma3` (3.3 GB), 8 192-token context.
-- **MSQ-X** — deep-reasoning variant tuned on `gemma3:12b` (8.1 GB), 32 768-token context.
-- **MSQ-Noir** — fully unrestricted variant tuned on `dolphin3` (4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
-- `training/msq/` directory added — contains `Modelfile.msq-1`, `Modelfile.msq-x`, `Modelfile.msq-noir`, and `setup.sh` (`bash training/msq/setup.sh` creates all three models via `ollama create`).
+- **MSQ-Lite-4B** — fast, minimal daily-driver tuned on `gemma3` (4B, 3.3 GB), 8 192-token context.
+- **MSQ-Pro-12B** — deep-reasoning variant tuned on `gemma3:12b` (12B, 8.1 GB), 32 768-token context.
+- **MSQ-Raw-8B** — fully unrestricted variant tuned on `dolphin3` (8B, 4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
+- `training/msq/` directory added — contains `Modelfile.msq-lite-4b`, `Modelfile.msq-pro-12b`, `Modelfile.msq-raw-8b`, and `setup.sh` (`bash training/msq/setup.sh` creates all three models via `ollama create`).
 - MSQ group registered at the top of `CURATED_OLLAMA_MODELS` in `modelService.js` so models appear first in the model selector.
 
 ### Uncensored Mode Hardening
 
 - `UNCENSORED_DIRECTIVE` is now `unshift`-ed to array position 0 in the system-prompt chain, overriding any earlier instructions.
 - Platform-context confidentiality rules 3–5 are excluded when `chatUncensoredMode` is `true`, preventing them from silently suppressing the uncensored directive.
-- `isUncensoredModelRecord` pattern in `server.js` extended to match the `msq-noir` model ID.
+- `isUncensoredModelRecord` pattern in `server.js` extended to match the `msq-raw` model ID.
 
 ### Web Search (www Chip)
 

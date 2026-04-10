@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 #  MSQ Model Setup — Mirabilis AI
-#  Registers MSQ-1, MSQ-X, and MSQ-Noir into your local Ollama instance.
+#  Registers MSQ-Lite-4B, MSQ-Pro-12B, and MSQ-Raw-8B into your local Ollama instance.
 #  Run once. Re-run anytime to rebuild after editing a Modelfile.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -33,9 +33,9 @@ echo ""
 echo "  MSQ Model Setup — Mirabilis AI"
 echo "  ═════════════════════════════════"
 
-create "msq-1"    "Modelfile.msq-1"    "gemma3:latest"  "3.3 GB"
-create "msq-x"    "Modelfile.msq-x"    "gemma3:12b"     "8.1 GB"
-create "msq-noir" "Modelfile.msq-noir" "dolphin3:latest" "4.9 GB"
+create "msq-lite-4b"  "Modelfile.msq-lite-4b"  "gemma3:latest"   "3.3 GB"
+create "msq-pro-12b" "Modelfile.msq-pro-12b" "gemma3:12b"      "8.1 GB"
+create "msq-raw-8b"  "Modelfile.msq-raw-8b"  "dolphin3:latest"  "4.9 GB"
 
 echo ""
 echo "  ✓  All three MSQ models are registered."
