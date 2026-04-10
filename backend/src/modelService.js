@@ -5,6 +5,10 @@ import { streamOllamaChat, listOllamaModels } from './providers/ollama.js';
 import { streamOpenAICompatibleChat, listOpenAICompatibleModels } from './providers/openaiCompatible.js';
 
 const CURATED_OLLAMA_MODELS = [
+  // ── MSQ family — Mirabilis native models (built with training/msq/setup.sh)
+  { id: 'msq-1',    label: 'MSQ-1',    group: 'MSQ', ollamaId: 'msq-1',    size: '3.3 GB' },
+  { id: 'msq-x',    label: 'MSQ-X',    group: 'MSQ', ollamaId: 'msq-x',    size: '8.1 GB' },
+  { id: 'msq-noir', label: 'MSQ-Noir', group: 'MSQ', ollamaId: 'msq-noir', size: '4.9 GB', uncensored: true },
   // Lightweight models — run well on most hardware
   { id: 'llama3',         label: 'Llama 3',           group: 'Lightweight', ollamaId: 'llama3',           size: '4.7 GB' },
   { id: 'llama3.1',       label: 'Llama 3.1',         group: 'Lightweight', ollamaId: 'llama3.1',         size: '4.7 GB' },

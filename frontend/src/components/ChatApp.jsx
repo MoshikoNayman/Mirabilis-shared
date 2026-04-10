@@ -85,8 +85,8 @@ function pickMostUncensoredModel(modelsList = []) {
 }
 
 function isImageRequest(text) {
-  const hasVerb = /\b(generate|create|draw|paint|make|render|produce)\b/i.test(text);
-  const hasNoun = /\b(image|picture|photo|photograph|illustration|artwork|painting|portrait|sketch|drawing|wallpaper)\b/i.test(text);
+  const hasVerb = /\b(generate|create|draw|paint|make|render|produce|show)\b/i.test(text);
+  const hasNoun = /\b(image|picture|pic|photo|photograph|illustration|artwork|painting|portrait|sketch|drawing|wallpaper|snapshot|snap)\b/i.test(text);
   return hasVerb && hasNoun;
 }
 
