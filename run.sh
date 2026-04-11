@@ -318,19 +318,35 @@ case "$PROVIDER" in
     echo "🚀 Using OpenAI-compatible provider"
     unset KOBOLD_BASE_URL KOBOLD_API_KEY || true
     if ! start_openai_compatible; then
-      exit 1
+      echo "⚠️  OpenAI-compatible provider failed — falling back to Ollama"
+      AI_PROVIDER="ollama"
+      unset OPENAI_BASE_URL OPENAI_API_KEY || true
+      if ! ensure_ollama_ready; then
+        echo "❌ Ollama is also unavailable. Start Ollama or run ./install.sh"
+        exit 1
+      fi
+      ensure_ollama_model || true
+    else
+      AI_PROVIDER="openai-compatible"
+      export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
     fi
-    AI_PROVIDER="openai-compatible"
-    export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
     ;;
   koboldcpp)
     echo "🚀 Using KoboldCpp provider"
     unset OPENAI_BASE_URL OPENAI_API_KEY || true
     if ! start_koboldcpp; then
-      exit 1
+      echo "⚠️  KoboldCpp provider failed — falling back to Ollama"
+      AI_PROVIDER="ollama"
+      unset KOBOLD_BASE_URL KOBOLD_API_KEY || true
+      if ! ensure_ollama_ready; then
+        echo "❌ Ollama is also unavailable. Start Ollama or run ./install.sh"
+        exit 1
+      fi
+      ensure_ollama_model || true
+    else
+      AI_PROVIDER="koboldcpp"
+      export KOBOLD_BASE_URL="http://127.0.0.1:5001/v1"
     fi
-    AI_PROVIDER="koboldcpp"
-    export KOBOLD_BASE_URL="http://127.0.0.1:5001/v1"
     ;;
   *)
     echo "❌ Unknown provider: $PROVIDER"

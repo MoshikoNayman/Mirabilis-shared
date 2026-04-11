@@ -658,11 +658,6 @@ const MessageRow = memo(function MessageRow({
     >
       <div className="mb-1 flex items-center justify-between gap-3 text-[10px] uppercase opacity-70">
         <span>{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'AI' : message.role}</span>
-        {!message.imageUrl && !message.imageGenerating && (
-          <span className="font-mono normal-case opacity-80">
-            Est. {formatTokenCount(message.tokenEstimate || 0)}
-          </span>
-        )}
       </div>
       {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
         ? (
@@ -710,55 +705,65 @@ const MessageRow = memo(function MessageRow({
           })}
         </div>
       )}
-      {message.role === 'assistant' && message.usage?.isEstimate && (
-        <div className="mt-2 font-mono text-[10px] opacity-60">
-          Est. context {formatTokenCount(message.usage.promptTokens)} · Est. total {formatTokenCount(message.usage.totalTokens)}
-        </div>
-      )}
       {message.role === 'assistant' && !message.imageGenerating && (
-        <div className="mt-2 flex justify-end gap-1.5">
-          <button
-            type="button"
-            onClick={() => {
-              if (speakingMessageId === message.id && isSpeaking) stopSpeaking();
-              else speakText(message.content || '', message.id);
-            }}
-            disabled={(voiceEngine === 'browser' && !voiceSupported) || !String(message.content || '').trim()}
-            title={speakingMessageId === message.id && isSpeaking ? 'Stop speaking' : 'Speak response'}
-            className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition disabled:opacity-40 ${
-              speakingMessageId === message.id && isSpeaking
-                ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                : 'text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200'
-            }`}
-          >
-            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M4 12h1" />
-              <path d="M8 9v6" />
-              <path d="M12 7v10" />
-              <path d="M16 9v6" />
-              <path d="M20 11v2" />
-            </svg>
-            {speakingMessageId === message.id && isSpeaking ? 'Stop' : 'Speak'}
-          </button>
-
-          {isLastAssistant && (
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/[0.06] pt-1.5 dark:border-white/[0.07]">
+          {/* Token info — left side */}
+          <div className="font-mono text-[9.5px] leading-none text-slate-400 dark:text-slate-500">
+            {!message.imageUrl && (
+              <span>~{(message.tokenEstimate || 0).toLocaleString()} tok</span>
+            )}
+            {message.usage?.isEstimate && (
+              <>
+                <span className="mx-1 opacity-50">·</span>
+                <span>ctx {formatTokenCount(message.usage.promptTokens)}</span>
+                <span className="mx-1 opacity-50">·</span>
+                <span>total {formatTokenCount(message.usage.totalTokens)}</span>
+              </>
+            )}
+          </div>
+          {/* Actions — right side */}
+          <div className="flex items-center gap-0.5">
             <button
-              onClick={regenerate}
-              disabled={isStreaming}
-              title="Regenerate response"
-              className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-400 transition hover:bg-black/5 hover:text-slate-700 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+              type="button"
+              onClick={() => {
+                if (speakingMessageId === message.id && isSpeaking) stopSpeaking();
+                else speakText(message.content || '', message.id);
+              }}
+              disabled={(voiceEngine === 'browser' && !voiceSupported) || !String(message.content || '').trim()}
+              title={speakingMessageId === message.id && isSpeaking ? 'Stop speaking' : 'Speak response'}
+              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition disabled:opacity-40 ${
+                speakingMessageId === message.id && isSpeaking
+                  ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                  : 'text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200'
+              }`}
             >
-              <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 4a8 8 0 0 1 12 0" />
-                <path d="M16 16a8 8 0 0 1-12 0" />
-                <polyline points="13 1 16 4 13 7" />
-                <polyline points="7 19 4 16 7 13" />
+              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 12h1" />
+                <path d="M8 9v6" />
+                <path d="M12 7v10" />
+                <path d="M16 9v6" />
+                <path d="M20 11v2" />
               </svg>
-              Regenerate
+              {speakingMessageId === message.id && isSpeaking ? 'Stop' : 'Speak'}
             </button>
-          )}
-
-          <CopyMessageButton text={message.content || ''} />
+            {isLastAssistant && (
+              <button
+                onClick={regenerate}
+                disabled={isStreaming}
+                title="Regenerate response"
+                className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-400 transition hover:bg-black/5 hover:text-slate-700 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+              >
+                <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 4a8 8 0 0 1 12 0" />
+                  <path d="M16 16a8 8 0 0 1-12 0" />
+                  <polyline points="13 1 16 4 13 7" />
+                  <polyline points="7 19 4 16 7 13" />
+                </svg>
+                Regenerate
+              </button>
+            )}
+            <CopyMessageButton text={message.content || ''} />
+          </div>
         </div>
       )}
     </article>
