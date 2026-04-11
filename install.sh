@@ -99,17 +99,15 @@ install_koboldcpp() {
   fi
 
   local kobold_url
-  kobold_url="$(python3 - <<PY
-import json, urllib.request
-api='https://api.github.com/repos/LostRuins/koboldcpp/releases/latest'
-with urllib.request.urlopen(api) as r:
-    release=json.load(r)
+  kobold_url="$(curl -fsSL "https://api.github.com/repos/LostRuins/koboldcpp/releases/latest" \
+    | python3 -c "
+import json, sys
+release = json.load(sys.stdin)
 for asset in release.get('assets', []):
     if asset.get('name') == '${asset_name}':
         print(asset.get('browser_download_url', ''))
         break
-PY
-)"
+")"
 
   if [[ -z "$kobold_url" ]]; then
     echo "❌ Could not resolve KoboldCpp release asset URL."
