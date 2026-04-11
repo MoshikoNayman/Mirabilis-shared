@@ -716,14 +716,6 @@ const MessageRow = memo(function MessageRow({
             {!message.imageUrl && (
               <span>~{(message.tokenEstimate || 0).toLocaleString()} tok</span>
             )}
-            {message.usage?.isEstimate && (
-              <>
-                <span className="mx-1 opacity-50">·</span>
-                <span>ctx {formatTokenCount(message.usage.promptTokens)}</span>
-                <span className="mx-1 opacity-50">·</span>
-                <span>total {formatTokenCount(message.usage.totalTokens)}</span>
-              </>
-            )}
           </div>
           {/* Actions — right side */}
           <div className="flex items-center gap-0.5">
