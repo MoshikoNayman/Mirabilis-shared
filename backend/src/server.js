@@ -1690,7 +1690,9 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
     chat.messages.push(assistantMessage);
     chat.updatedAt = nowIso();
-    await saveChat(config.chatStorePath, chat);
+    if (getEpoch() === requestEpoch) {
+      await saveChat(config.chatStorePath, chat);
+    }
 
     if (trainingMode === 'fine-tuning') {
       const record = {
@@ -1724,7 +1726,9 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     if (!assistantText) {
       chat.messages = chat.messages.filter((m) => m.id !== userMessage.id);
       chat.updatedAt = prevChatUpdatedAt;
-      await saveChat(config.chatStorePath, chat).catch(() => {});
+      if (getEpoch() === requestEpoch) {
+        await saveChat(config.chatStorePath, chat).catch(() => {});
+      }
     }
     sendSSE(res, 'error', { error: error.message || 'Unknown error' });
     res.end();
