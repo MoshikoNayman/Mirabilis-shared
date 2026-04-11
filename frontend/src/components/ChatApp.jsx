@@ -653,12 +653,12 @@ const MessageRow = memo(function MessageRow({
   const isLastAssistant = message.role === 'assistant' && !message.imageGenerating && isLast;
   return (
     <article
-      className={`fade-in max-w-[90%] rounded-2xl px-3 py-2 text-sm shadow-sm sm:max-w-[75%] ${
+      className={`fade-in text-sm ${
         message.role === 'user'
-          ? 'ml-auto bg-accent text-white shadow-[0_10px_22px_-14px_rgba(26,168,111,0.9)]'
+          ? 'ml-auto max-w-[90%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] bg-accent text-white shadow-[0_10px_22px_-14px_rgba(26,168,111,0.9)]'
           : speakingMessageId === message.id
-          ? 'border border-accent/50 bg-accentSoft/35 text-slate-800 shadow-[0_0_0_1px_rgba(26,168,111,0.15)] dark:border-accent/60 dark:bg-accent/10 dark:text-slate-100'
-          : 'border border-black/10 bg-white text-slate-800 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100'
+          ? 'w-full rounded-xl border border-accent/50 bg-accentSoft/35 px-3 py-2 text-slate-800 shadow-[0_0_0_1px_rgba(26,168,111,0.15)] dark:border-accent/60 dark:bg-accent/10 dark:text-slate-100'
+          : 'w-full text-slate-800 dark:text-slate-100'
       }`}
     >
       {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
@@ -726,11 +726,7 @@ const MessageRow = memo(function MessageRow({
         </div>
       )}
       {message.role === 'assistant' && !message.imageGenerating && (
-        <div className={`sticky bottom-0 mt-1.5 flex items-center justify-between rounded-b-2xl border-t border-black/[0.06] pt-1 dark:border-white/[0.07] ${
-          speakingMessageId === message.id
-            ? 'bg-accentSoft/90 dark:bg-slate-800/90'
-            : 'bg-white/95 dark:bg-slate-800/95'
-        }`}>
+        <div className="mt-1.5 flex items-center justify-between border-t border-black/[0.06] pt-1 dark:border-white/[0.07]">
           <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-slate-400 dark:text-slate-500">
             {!message.imageUrl ? `AI · ~${(message.tokenEstimate || 0).toLocaleString()} tok` : 'AI'}
           </span>
