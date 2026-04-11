@@ -705,6 +705,25 @@ const MessageRow = memo(function MessageRow({
           })}
         </div>
       )}
+      {message.role === 'user' && message.content && (
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/20 pb-0.5 pt-1.5">
+          <div className="font-mono text-[9.5px] leading-none text-white/60">
+            ~{(message.tokenEstimate || 0).toLocaleString()} tok
+          </div>
+          <button
+            type="button"
+            onClick={() => navigator.clipboard.writeText(message.content || '').catch(() => {})}
+            title="Copy message"
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            Copy
+          </button>
+        </div>
+      )}
       {message.role === 'assistant' && !message.imageGenerating && (
         <div className={`sticky bottom-0 mt-2 flex items-center justify-between gap-2 rounded-b-2xl border-t border-black/[0.06] pb-0.5 pt-1.5 dark:border-white/[0.07] ${
           speakingMessageId === message.id
@@ -3284,7 +3303,7 @@ export default function ChatApp() {
             <div className="flex items-baseline justify-between gap-2">
               <p className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300">{statusText}</p>
               <p className="truncate font-mono text-[11px] text-slate-400 dark:text-slate-400">
-                Est. input {formatTokenCount(chatTokenSummary.input)} · Est. output {formatTokenCount(chatTokenSummary.output)}
+                input {formatTokenCount(chatTokenSummary.input)} · output {formatTokenCount(chatTokenSummary.output)}
               </p>
             </div>
 
@@ -3392,7 +3411,7 @@ export default function ChatApp() {
                         setIsContextPanelOpen((prev) => !prev);
                       }}
                       className="inline-flex items-center justify-center rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
-                      title={`Estimated context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
+                      title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
                     >
                       Context {contextUsage.usedPct}%
                     </button>
@@ -3401,7 +3420,7 @@ export default function ChatApp() {
                       <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
                         <div className="mb-2 flex items-center justify-between">
                           <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Token Limit</span>
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400">Est. {contextUsage.usedPct}% used</span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400">{contextUsage.usedPct}% used</span>
                         </div>
 
                         <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
