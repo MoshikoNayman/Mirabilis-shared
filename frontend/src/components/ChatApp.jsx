@@ -865,6 +865,10 @@ export default function ChatApp() {
   const [openHardwarePopover, setOpenHardwarePopover] = useState(null);
   const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
   const [isSystemPromptVisible, setIsSystemPromptVisible] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-sidebar-open') !== 'false';
+    return true;
+  });
   const [selectedEngine, setSelectedEngine] = useState(() => {
     if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-engine-option') || '';
     return '';
@@ -3096,7 +3100,7 @@ export default function ChatApp() {
   return (
     <main className="relative h-screen w-screen p-3 sm:p-6">
       <div className="mx-auto flex h-full max-w-7xl gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
-        <aside className="flex w-28 shrink-0 flex-col gap-3 rounded-2xl border border-[var(--panel-border)] bg-white/65 p-2 dark:bg-slate-950/45 sm:w-72 sm:p-4">
+        <aside className={`flex shrink-0 flex-col gap-3 rounded-2xl border border-[var(--panel-border)] bg-white/65 p-2 dark:bg-slate-950/45 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span aria-hidden="true" className="icq-mark" title="ICQ logo">
@@ -3292,7 +3296,22 @@ export default function ChatApp() {
           )}
           <header className="mb-3 border-b border-black/10 pb-3 dark:border-white/10">
             <div className="flex items-baseline justify-between gap-2">
-              <p className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300">{statusText}</p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen((v) => { const next = !v; window.localStorage.setItem('mirabilis-sidebar-open', String(next)); return next; })}
+                  title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+                  className="rounded p-1 text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    {sidebarOpen
+                      ? <><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></>
+                      : <><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></>
+                    }
+                  </svg>
+                </button>
+                <p className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300">{statusText}</p>
+              </div>
               <p className="truncate font-mono text-[11px] text-slate-400 dark:text-slate-400">
                 input {formatTokenCount(chatTokenSummary.input)} · output {formatTokenCount(chatTokenSummary.output)}
               </p>
