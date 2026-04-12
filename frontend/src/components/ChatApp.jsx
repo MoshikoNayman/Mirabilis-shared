@@ -2328,7 +2328,17 @@ export default function ChatApp() {
           body: JSON.stringify({ modelId: ollamaId }),
           signal: ctrl.signal
         });
-        if (!res.ok || !res.body) throw new Error('Pull request failed');
+        if (!res.ok) {
+          let message = 'Pull request failed';
+          try {
+            const text = await res.text();
+            if (text) message = text;
+          } catch {
+            // Keep generic message.
+          }
+          throw new Error(message);
+        }
+        if (!res.body) throw new Error('Pull request returned no stream');
         const reader = res.body.getReader();
         const dec = new TextDecoder('utf8');
         let buf = '';
@@ -2360,8 +2370,12 @@ export default function ChatApp() {
             currentEvent = '';
           }
         }
-      } catch {
+      } catch (error) {
         setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
+        const msg = error?.name === 'AbortError'
+          ? `Model install canceled: ${modelId}`
+          : `Model install failed: ${error?.message || 'unknown error'}`;
+        setStatusText(msg);
       }
     })();
   }

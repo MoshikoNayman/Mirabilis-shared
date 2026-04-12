@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S10] — 2026-04-12
+
+### MSQ GUI Install Fixes
+
+- Fixed GUI model install flow for MSQ models (`msq-pro-12b`, `msq-ultra-31b`, `msq-raw-8b`).
+- `POST /api/models/pull` now detects `msq-*` IDs and builds from local Modelfiles instead of trying registry-only pull behavior.
+- Added automatic base-model pull for MSQ installs when missing.
+- Added clearer streamed progress/status messages for MSQ build steps.
+- Improved frontend install error handling so failures are shown in status text instead of silently disappearing.
+
+---
+
 ## [26.3R1-S9] — 2026-04-12
 
 ### MSQ Model Setup Reliability

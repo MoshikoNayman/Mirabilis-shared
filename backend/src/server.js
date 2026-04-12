@@ -660,12 +660,92 @@ app.post('/api/providers/switch-model', async (req, res) => {
 
 // Ollama model IDs are alphanumeric + hyphens/dots/colons — validate before forwarding
 const SAFE_MODEL_RE = /^[a-z0-9][a-z0-9._:/-]{0,99}$/i;
+const MSQ_MODEL_SPECS = {
+  'msq-pro-12b': { base: 'gemma3:12b', modelfile: 'Modelfile.msq-pro-12b' },
+  'msq-ultra-31b': { base: 'gemma4:31b', modelfile: 'Modelfile.msq-ultra-31b' },
+  'msq-raw-8b': { base: 'dolphin3:latest', modelfile: 'Modelfile.msq-raw-8b' }
+};
+
+function streamOllamaPullToSSE(upstream, send, statusPrefix = '') {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const reader = upstream.body.getReader();
+      const decoder = new TextDecoder('utf8');
+      let buf = '';
+      let sawSuccess = false;
+      let lastErrorMessage = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const payload = JSON.parse(trimmed);
+            if (payload.error) {
+              lastErrorMessage = String(payload.error);
+              send('error', { message: lastErrorMessage });
+              return resolve({ ok: false, error: lastErrorMessage });
+            }
+            const pct = payload.total
+              ? Math.round((payload.completed / payload.total) * 100)
+              : null;
+            const status = payload.status || '';
+            send('progress', { status: `${statusPrefix}${status}`.trim(), pct });
+            if (status === 'success') {
+              sawSuccess = true;
+              return resolve({ ok: true });
+            }
+          } catch {
+            // Skip malformed chunks.
+          }
+        }
+      }
+
+      if (buf.trim()) {
+        try {
+          const payload = JSON.parse(buf.trim());
+          if (payload.error) lastErrorMessage = String(payload.error);
+          if (payload.status === 'success') sawSuccess = true;
+        } catch {
+          // ignore trailing non-json fragment
+        }
+      }
+
+      if (sawSuccess) return resolve({ ok: true });
+      return resolve({ ok: false, error: lastErrorMessage || 'Pull did not complete successfully' });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function runProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', (code) => resolve({ code: Number(code || 0), stdout, stderr }));
+  });
+}
 
 app.post('/api/models/pull', async (req, res) => {
   const { modelId } = req.body || {};
   if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
     return res.status(400).json({ error: 'Invalid model ID' });
   }
+  const requestedModelId = String(modelId).trim().toLowerCase();
+  const isMsqModel = Object.prototype.hasOwnProperty.call(MSQ_MODEL_SPECS, requestedModelId);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -678,10 +758,55 @@ app.post('/api/models/pull', async (req, res) => {
 
   try {
     const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
+
+    if (isMsqModel) {
+      const { base, modelfile } = MSQ_MODEL_SPECS[requestedModelId];
+      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'msq', modelfile);
+      if (!existsSync(modelfilePath)) {
+        send('error', { message: `MSQ Modelfile not found: ${modelfilePath}` });
+        return res.end();
+      }
+
+      send('progress', { status: `Preparing ${requestedModelId}`, pct: null });
+
+      const baseCheck = await runProcess('ollama', ['show', base]);
+      if (baseCheck.code !== 0) {
+        send('progress', { status: `Pulling base model ${base}`, pct: null });
+        const basePull = await fetch(`${ollamaBase}/api/pull`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: base, stream: true })
+        });
+        if (!basePull.ok) {
+          const msg = await basePull.text().catch(() => 'Base model pull failed');
+          send('error', { message: msg });
+          return res.end();
+        }
+        const baseResult = await streamOllamaPullToSSE(basePull, send, `${base}: `);
+        if (!baseResult.ok) {
+          send('error', { message: baseResult.error || `Failed to pull ${base}` });
+          return res.end();
+        }
+      }
+
+      send('progress', { status: `Creating ${requestedModelId} from Modelfile`, pct: null });
+      const created = await runProcess('ollama', ['create', requestedModelId, '-f', modelfilePath], {
+        cwd: MIRABILIS_ROOT
+      });
+      if (created.code !== 0) {
+        const message = (created.stderr || created.stdout || `ollama create failed for ${requestedModelId}`).trim();
+        send('error', { message });
+        return res.end();
+      }
+
+      send('done', { modelId: requestedModelId });
+      return res.end();
+    }
+
     const upstream = await fetch(`${ollamaBase}/api/pull`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId, stream: true })
+      body: JSON.stringify({ model: requestedModelId, stream: true })
     });
 
     if (!upstream.ok) {
@@ -690,59 +815,11 @@ app.post('/api/models/pull', async (req, res) => {
       return res.end();
     }
 
-    const reader = upstream.body.getReader();
-    const decoder = new TextDecoder('utf8');
-    let buf = '';
-    let sawSuccess = false;
-    let lastErrorMessage = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const payload = JSON.parse(trimmed);
-          if (payload.error) {
-            lastErrorMessage = String(payload.error);
-            send('error', { message: lastErrorMessage });
-            return res.end();
-          }
-          // Normalise into a consistent shape for the frontend
-          const pct = payload.total
-            ? Math.round((payload.completed / payload.total) * 100)
-            : null;
-          send('progress', { status: payload.status || '', pct });
-          if (payload.status === 'success') {
-            sawSuccess = true;
-            send('done', { modelId });
-            return res.end();
-          }
-        } catch { /* skip malformed lines */ }
-      }
-    }
-    if (buf.trim()) {
-      try {
-        const payload = JSON.parse(buf.trim());
-        if (payload.error) {
-          lastErrorMessage = String(payload.error);
-        }
-        if (payload.status === 'success') {
-          sawSuccess = true;
-        }
-      } catch {
-        // ignore trailing partial/non-json content
-      }
-    }
-
-    if (sawSuccess) {
-      send('done', { modelId });
+    const result = await streamOllamaPullToSSE(upstream, send);
+    if (result.ok) {
+      send('done', { modelId: requestedModelId });
     } else {
-      send('error', { message: lastErrorMessage || 'Pull did not complete successfully' });
+      send('error', { message: result.error || 'Pull did not complete successfully' });
     }
   } catch (err) {
     send('error', { message: err.message || 'Pull error' });
