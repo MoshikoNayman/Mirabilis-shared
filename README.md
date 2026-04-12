@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version: 26.3R1-S10
+Version: 26.3R1-S11
 Owner and Builder: Moshiko Nayman
 
 Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.
@@ -172,6 +172,8 @@ The setup script now auto-pulls missing base models and prints clear diagnostics
 Models will appear in the **MSQ** group at the top of the model selector after setup.
 
 You can also install MSQ models directly from the UI model menu in Ollama mode; Mirabilis now builds `msq-*` models from local Modelfiles when you click Install.
+
+Model installs now run as server-side jobs (with status persistence and cancel support), so refresh/reload does not lose install state.
 
 > **MSQ-Ultra-31B** requires ~20 GB RAM/VRAM. Works on Apple Silicon Macs with 24 GB+ unified memory.
 >

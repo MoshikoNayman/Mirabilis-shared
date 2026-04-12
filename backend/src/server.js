@@ -665,6 +665,35 @@ const MSQ_MODEL_SPECS = {
   'msq-ultra-31b': { base: 'gemma4:31b', modelfile: 'Modelfile.msq-ultra-31b' },
   'msq-raw-8b': { base: 'dolphin3:latest', modelfile: 'Modelfile.msq-raw-8b' }
 };
+const modelInstallJobs = new Map(); // jobId -> job
+
+function cloneJob(job) {
+  return {
+    id: job.id,
+    modelId: job.modelId,
+    status: job.status,
+    pct: job.pct,
+    message: job.message,
+    error: job.error,
+    done: job.done,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt
+  };
+}
+
+function updateJob(job, patch) {
+  Object.assign(job, patch, { updatedAt: nowIso() });
+}
+
+function pruneModelInstallJobs(maxAgeMs = 6 * 60 * 60 * 1000) {
+  const now = Date.now();
+  for (const [id, job] of modelInstallJobs.entries()) {
+    const updatedAt = Date.parse(job.updatedAt || 0);
+    if (job.done && Number.isFinite(updatedAt) && (now - updatedAt) > maxAgeMs) {
+      modelInstallJobs.delete(id);
+    }
+  }
+}
 
 function streamOllamaPullToSSE(upstream, send, statusPrefix = '') {
   return new Promise(async (resolve, reject) => {
@@ -730,14 +759,222 @@ function runProcess(command, args, options = {}) {
       cwd: options.cwd,
       stdio: ['ignore', 'pipe', 'pipe']
     });
+    if (typeof options.onSpawn === 'function') {
+      options.onSpawn(proc);
+    }
     let stdout = '';
     let stderr = '';
+    let abortHandler = null;
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        try { proc.kill('SIGTERM'); } catch { /* ignore */ }
+      }
+      abortHandler = () => {
+        try { proc.kill('SIGTERM'); } catch { /* ignore */ }
+      };
+      options.signal.addEventListener('abort', abortHandler, { once: true });
+    }
+
     proc.stdout.on('data', (d) => { stdout += d.toString(); });
     proc.stderr.on('data', (d) => { stderr += d.toString(); });
     proc.on('error', reject);
-    proc.on('close', (code) => resolve({ code: Number(code || 0), stdout, stderr }));
+    proc.on('close', (code) => {
+      if (options.signal && abortHandler) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
+      resolve({ code: Number(code || 0), stdout, stderr });
+    });
   });
 }
+
+async function streamOllamaPullToJob(upstream, job, statusPrefix = '') {
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder('utf8');
+  let buf = '';
+  let sawSuccess = false;
+  let lastErrorMessage = '';
+
+  while (true) {
+    if (job.abortController.signal.aborted) {
+      throw new Error('canceled');
+    }
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const payload = JSON.parse(trimmed);
+        if (payload.error) {
+          lastErrorMessage = String(payload.error);
+          throw new Error(lastErrorMessage);
+        }
+        const pct = payload.total
+          ? Math.round((payload.completed / payload.total) * 100)
+          : null;
+        const status = payload.status || '';
+        updateJob(job, { message: `${statusPrefix}${status}`.trim(), pct });
+        if (status === 'success') {
+          sawSuccess = true;
+          return;
+        }
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          // Skip malformed chunks from upstream.
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  if (!sawSuccess) {
+    throw new Error(lastErrorMessage || 'Pull did not complete successfully');
+  }
+}
+
+async function runInstallJob(job) {
+  const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
+  const modelId = String(job.modelId).trim().toLowerCase();
+  const isMsqModel = Object.prototype.hasOwnProperty.call(MSQ_MODEL_SPECS, modelId);
+
+  updateJob(job, { status: 'running', message: `Preparing ${modelId}`, pct: null, error: null });
+
+  try {
+    if (isMsqModel) {
+      const { base, modelfile } = MSQ_MODEL_SPECS[modelId];
+      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'msq', modelfile);
+      if (!existsSync(modelfilePath)) {
+        throw new Error(`MSQ Modelfile not found: ${modelfilePath}`);
+      }
+
+      const baseCheck = await runProcess('ollama', ['show', base], {
+        signal: job.abortController.signal,
+        onSpawn: (proc) => { job.currentProcess = proc; }
+      });
+      job.currentProcess = null;
+
+      if (baseCheck.code !== 0) {
+        updateJob(job, { message: `Pulling base model ${base}`, pct: null });
+        const basePull = await fetch(`${ollamaBase}/api/pull`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: base, stream: true }),
+          signal: job.abortController.signal
+        });
+        if (!basePull.ok) {
+          const msg = await basePull.text().catch(() => `Failed to pull ${base}`);
+          throw new Error(msg);
+        }
+        await streamOllamaPullToJob(basePull, job, `${base}: `);
+      }
+
+      updateJob(job, { message: `Creating ${modelId} from Modelfile`, pct: null });
+      const created = await runProcess('ollama', ['create', modelId, '-f', modelfilePath], {
+        cwd: MIRABILIS_ROOT,
+        signal: job.abortController.signal,
+        onSpawn: (proc) => { job.currentProcess = proc; }
+      });
+      job.currentProcess = null;
+      if (created.code !== 0) {
+        throw new Error((created.stderr || created.stdout || `ollama create failed for ${modelId}`).trim());
+      }
+    } else {
+      updateJob(job, { message: `Pulling ${modelId}`, pct: 0 });
+      const upstream = await fetch(`${ollamaBase}/api/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId, stream: true }),
+        signal: job.abortController.signal
+      });
+      if (!upstream.ok) {
+        const msg = await upstream.text().catch(() => 'Pull failed');
+        throw new Error(msg);
+      }
+      await streamOllamaPullToJob(upstream, job);
+    }
+
+    updateJob(job, { status: 'completed', message: 'Install complete', pct: 100, done: true });
+  } catch (error) {
+    const canceled = job.abortController.signal.aborted || String(error?.message || '').toLowerCase() === 'canceled';
+    if (canceled) {
+      updateJob(job, { status: 'canceled', message: 'Install canceled', done: true, error: null });
+    } else {
+      updateJob(job, {
+        status: 'failed',
+        message: 'Install failed',
+        done: true,
+        error: error?.message || 'unknown error'
+      });
+    }
+  } finally {
+    job.currentProcess = null;
+    pruneModelInstallJobs();
+  }
+}
+
+app.get('/api/models/install-jobs', async (_req, res) => {
+  pruneModelInstallJobs();
+  const jobs = Array.from(modelInstallJobs.values())
+    .sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0))
+    .slice(0, 50)
+    .map(cloneJob);
+  return res.json({ jobs });
+});
+
+app.get('/api/models/install-jobs/:jobId', async (req, res) => {
+  pruneModelInstallJobs();
+  const job = modelInstallJobs.get(String(req.params.jobId || ''));
+  if (!job) return res.status(404).json({ error: 'Install job not found' });
+  return res.json({ job: cloneJob(job) });
+});
+
+app.post('/api/models/install-jobs', async (req, res) => {
+  const modelId = String(req.body?.modelId || '').trim().toLowerCase();
+  if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
+    return res.status(400).json({ error: 'Invalid model ID' });
+  }
+
+  for (const job of modelInstallJobs.values()) {
+    if (!job.done && job.modelId === modelId) {
+      return res.status(202).json({ job: cloneJob(job), deduped: true });
+    }
+  }
+
+  const job = {
+    id: uuidv4(),
+    modelId,
+    status: 'queued',
+    pct: null,
+    message: 'Queued',
+    error: null,
+    done: false,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    abortController: new AbortController(),
+    currentProcess: null
+  };
+  modelInstallJobs.set(job.id, job);
+
+  void runInstallJob(job);
+  return res.status(202).json({ job: cloneJob(job) });
+});
+
+app.post('/api/models/install-jobs/:jobId/cancel', async (req, res) => {
+  const job = modelInstallJobs.get(String(req.params.jobId || ''));
+  if (!job) return res.status(404).json({ error: 'Install job not found' });
+  if (job.done) return res.json({ job: cloneJob(job), alreadyDone: true });
+
+  updateJob(job, { status: 'canceling', message: 'Canceling install...' });
+  try { job.abortController.abort(); } catch { /* ignore */ }
+  try { job.currentProcess?.kill('SIGTERM'); } catch { /* ignore */ }
+
+  return res.json({ job: cloneJob(job), cancelRequested: true });
+});
 
 app.post('/api/models/pull', async (req, res) => {
   const { modelId } = req.body || {};

@@ -2290,10 +2290,17 @@ export default function ChatApp() {
   function cancelInstall(modelId) {
     setPullingModels((prev) => {
       if (prev[modelId]?.ctrl) prev[modelId].ctrl.abort();
+      const jobId = prev[modelId]?.jobId;
+      if (jobId) {
+        api(`/api/models/install-jobs/${encodeURIComponent(jobId)}/cancel`, {
+          method: 'POST'
+        }).catch(() => {});
+      }
       const n = { ...prev };
       delete n[modelId];
       return n;
     });
+    setStatusText(`Model install canceled: ${modelId}`);
   }
 
   async function deleteModel(ollamaId, modelId) {
@@ -2319,56 +2326,71 @@ export default function ChatApp() {
     }
     if (pullingModels[modelId]) return; // already pulling
     const ctrl = new AbortController();
-    setPullingModels((prev) => ({ ...prev, [modelId]: { pct: null, status: 'Connecting…', ctrl } }));
+    setPullingModels((prev) => ({ ...prev, [modelId]: { pct: null, status: 'Queued…', ctrl, jobId: null } }));
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/models/pull`, {
+        const started = await api('/api/models/install-jobs', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modelId: ollamaId }),
-          signal: ctrl.signal
+          body: JSON.stringify({ modelId: ollamaId })
         });
-        if (!res.ok) {
-          let message = 'Pull request failed';
-          try {
-            const text = await res.text();
-            if (text) message = text;
-          } catch {
-            // Keep generic message.
-          }
-          throw new Error(message);
+
+        const jobId = started?.job?.id;
+        if (!jobId) {
+          throw new Error('Install job was not created');
         }
-        if (!res.body) throw new Error('Pull request returned no stream');
-        const reader = res.body.getReader();
-        const dec = new TextDecoder('utf8');
-        let buf = '';
-        let currentEvent = '';
+
+        setPullingModels((prev) => {
+          if (!prev[modelId]) return prev;
+          return {
+            ...prev,
+            [modelId]: {
+              ...prev[modelId],
+              jobId,
+              status: started?.job?.message || 'Starting…',
+              pct: started?.job?.pct ?? null
+            }
+          };
+        });
+
         while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() || '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) { currentEvent = line.slice(7).trim(); continue; }
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const payload = JSON.parse(line.slice(6));
-              if (currentEvent === 'done' || payload.modelId) {
-                setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
-                await refreshModels();
-              } else if (currentEvent === 'error') {
-                setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
-                setStatusText(`Model install failed: ${payload.message || 'unknown error'}`);
-              } else {
-                setPullingModels((prev) => ({
-                  ...prev,
-                  [modelId]: { pct: payload.pct ?? null, status: payload.status || '', ctrl }
-                }));
-              }
-            } catch { /* skip malformed lines */ }
-            currentEvent = '';
+          if (ctrl.signal.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
           }
+
+          const polled = await api(`/api/models/install-jobs/${encodeURIComponent(jobId)}`);
+          const job = polled?.job;
+          if (!job) {
+            throw new Error('Install job not found');
+          }
+
+          setPullingModels((prev) => {
+            if (!prev[modelId]) return prev;
+            return {
+              ...prev,
+              [modelId]: {
+                ...prev[modelId],
+                pct: job.pct ?? null,
+                status: job.message || job.status || '',
+                jobId
+              }
+            };
+          });
+
+          if (job.done) {
+            setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
+
+            if (job.status === 'completed') {
+              await refreshModels();
+              setStatusText(`Model installed: ${modelId}`);
+            } else if (job.status === 'canceled') {
+              setStatusText(`Model install canceled: ${modelId}`);
+            } else {
+              setStatusText(`Model install failed: ${job.error || job.message || 'unknown error'}`);
+            }
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 700));
         }
       } catch (error) {
         setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });

@@ -2,6 +2,21 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S11] — 2026-04-12
+
+### Model Install Job System
+
+- Added persistent server-side model install jobs with APIs:
+  - `POST /api/models/install-jobs` (start)
+  - `GET /api/models/install-jobs/:jobId` (status)
+  - `POST /api/models/install-jobs/:jobId/cancel` (cancel)
+  - `GET /api/models/install-jobs` (recent jobs)
+- Frontend model install flow now uses job polling instead of a single fragile streaming request.
+- Cancel in UI now triggers backend cancel request and attempts to terminate active install work.
+- Install progress/status now survives frontend refresh/reload because job state is kept server-side.
+
+---
+
 ## [26.3R1-S10] — 2026-04-12
 
 ### MSQ GUI Install Fixes
