@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S14] — 2026-04-12
+
+### Chat Performance Optimization
+
+- Reduced server-injected platform system prompt size to cut prefill overhead.
+- Added bounded conversation history window for inference context:
+  - `MIRABILIS_MAX_HISTORY_MESSAGES` (default: 24)
+  - `MIRABILIS_MAX_HISTORY_TOKENS` (default: 1800)
+- Result: tiny-message baseline prompt estimate dropped significantly (observed ~725 -> ~217 tokens), reducing CPU spikes and response startup latency.
+
+---
+
 ## [26.3R1-S13] — 2026-04-12
 
 ### JS Command Surface Expansion (Pre-Cutover)
