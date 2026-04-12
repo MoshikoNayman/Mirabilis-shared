@@ -13,12 +13,17 @@
  * All requests are logged to mcp-server-audit.jsonl in the data directory.
  */
 
-import { mkdir, appendFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { mkdir, appendFile, readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { dirname, resolve, normalize } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
+import os from 'node:os';
+
+const execAsync = promisify(exec);
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_INFO = { name: 'mirabilis', version: '26.3R1-S3' };
+const SERVER_INFO = { name: 'mirabilis', version: '26.3R1-S5' };
 
 const TOOLS = [
   {
@@ -70,6 +75,60 @@ const TOOLS = [
       type: 'object',
       properties: {},
       required: []
+    }
+  },
+  // ── System / OS tools ────────────────────────────────────────────────────
+  {
+    name: 'system_info',
+    description: 'Get system information about the machine running Mirabilis: OS, platform, architecture, hostname, home directory, working directory.',
+    inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: 'list_dir',
+    description: 'List files and directories at a given path on the host machine.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Directory path to list. Use "." for the current working directory.' }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'read_file',
+    description: 'Read the text contents of a file on the host machine. Maximum 512 KB.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute or relative path to the file.' }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'write_file',
+    description: 'Write or overwrite a file on the host machine with the given text content. Requires confirmed: true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute or relative path to write.' },
+        content: { type: 'string', description: 'Text content to write to the file.' },
+        confirmed: { type: 'boolean', description: 'Must be true. Confirms intent to write the file.' }
+      },
+      required: ['path', 'content', 'confirmed']
+    }
+  },
+  {
+    name: 'run_command',
+    description: 'Execute a shell command on the host machine (macOS, Linux, Windows). Requires confirmed: true. Timeout: 30 seconds. Non-zero exit codes are returned as results, not errors.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Shell command to execute.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to the current working directory.' },
+        confirmed: { type: 'boolean', description: 'Must be true. Confirms intent to execute the command.' }
+      },
+      required: ['command', 'confirmed']
     }
   }
 ];
@@ -159,6 +218,100 @@ async function callMirabilisHealth(config) {
       koboldcpp: { ready: kobold, url: config.koboldBaseUrl }
     }
   };
+}
+
+// ── Safety blocklist for run_command ────────────────────────────────────────
+const BLOCKED_COMMAND_PATTERNS = [
+  /rm\s+-[a-z]*r[a-z]*f?\s+(\/|~\/?\s*$|~\s*$)/i, // rm -rf / or rm -rf ~
+  /mkfs(\.\w+)?\s/i,                                // mkfs.ext4 /dev/...
+  /dd\s+if=/i,                                       // dd if=... (disk wipe)
+  /format\s+[a-z]:/i,                               // format C: (Windows)
+  /:\s*\(\s*\)\s*\{.*\|.*&.*\}/,                  // fork bomb
+  /\b(shutdown|reboot|halt|poweroff)\b/i            // system power ops
+];
+
+function isSafeCommand(command) {
+  return !BLOCKED_COMMAND_PATTERNS.some((re) => re.test(command));
+}
+
+function safeResolvePath(inputPath) {
+  return resolve(process.cwd(), normalize(String(inputPath || '').replace(/\0/g, '')));
+}
+
+async function callSystemInfo() {
+  return {
+    platform: os.platform(),
+    type: os.type(),
+    release: os.release(),
+    arch: os.arch(),
+    hostname: os.hostname(),
+    homedir: os.homedir(),
+    cwd: process.cwd(),
+    nodeVersion: process.version
+  };
+}
+
+async function callListDir({ path: dirPath }) {
+  const resolved = safeResolvePath(dirPath);
+  const entries = await readdir(resolved, { withFileTypes: true });
+  return {
+    path: resolved,
+    entries: entries.map((e) => ({
+      name: e.name,
+      type: e.isDirectory() ? 'directory' : e.isFile() ? 'file' : 'other'
+    }))
+  };
+}
+
+async function callReadFile({ path: filePath }) {
+  const resolved = safeResolvePath(filePath);
+  const info = await stat(resolved);
+  const MAX_BYTES = 512 * 1024;
+  if (info.size > MAX_BYTES) {
+    throw new Error(`File too large (${info.size} bytes). Maximum is 512 KB.`);
+  }
+  const content = await readFile(resolved, 'utf8');
+  return { path: resolved, size: info.size, content };
+}
+
+async function callWriteFile({ path: filePath, content, confirmed }) {
+  if (!confirmed) {
+    throw new Error('write_file requires confirmed: true in the arguments to proceed.');
+  }
+  const resolved = safeResolvePath(filePath);
+  await mkdir(dirname(resolved), { recursive: true });
+  await writeFile(resolved, String(content || ''), 'utf8');
+  return { path: resolved, bytesWritten: Buffer.byteLength(content || '', 'utf8') };
+}
+
+async function callRunCommand({ command, cwd: workDir, confirmed }) {
+  if (!confirmed) {
+    throw new Error('run_command requires confirmed: true in the arguments to proceed.');
+  }
+  const cmd = String(command || '').trim();
+  if (!cmd) throw new Error('command is required and cannot be empty.');
+  if (!isSafeCommand(cmd)) {
+    throw new Error('Command blocked: matches a potentially destructive pattern (e.g. rm -rf /, mkfs, dd, shutdown).');
+  }
+  const execCwd = workDir ? safeResolvePath(workDir) : process.cwd();
+  try {
+    const { stdout, stderr } = await execAsync(cmd, {
+      cwd: execCwd,
+      timeout: 30000,
+      maxBuffer: 2 * 1024 * 1024
+    });
+    return { command: cmd, cwd: execCwd, stdout: stdout || '', stderr: stderr || '', exitCode: 0 };
+  } catch (err) {
+    // Non-zero exit — return output rather than throwing so caller can read stderr
+    return {
+      command: cmd,
+      cwd: execCwd,
+      stdout: err.stdout || '',
+      stderr: err.stderr || '',
+      exitCode: typeof err.code === 'number' ? err.code : 1,
+      error: err.message
+    };
+  }
 }
 
 /**
@@ -254,6 +407,16 @@ export function createMcpServerHandler({ config, streamWithProvider, getEffectiv
           toolResult = await callMirabilisListModels(args, config, listModels);
         } else if (toolName === 'mirabilis_health') {
           toolResult = await callMirabilisHealth(config);
+        } else if (toolName === 'system_info') {
+          toolResult = await callSystemInfo();
+        } else if (toolName === 'list_dir') {
+          toolResult = await callListDir(args);
+        } else if (toolName === 'read_file') {
+          toolResult = await callReadFile(args);
+        } else if (toolName === 'write_file') {
+          toolResult = await callWriteFile(args);
+        } else if (toolName === 'run_command') {
+          toolResult = await callRunCommand(args);
         }
 
         const durationMs = Date.now() - startedAt;

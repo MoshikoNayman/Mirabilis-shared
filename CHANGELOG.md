@@ -2,6 +2,24 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S5] — 2026-04-12
+
+### System Control Tools (MCP)
+
+- Added five new MCP tools to control the machine where Mirabilis is installed:
+  - `system_info` — returns OS, platform, arch, hostname, home dir, cwd, Node version. No confirmation needed.
+  - `list_dir` — lists files/directories at any path. No confirmation needed.
+  - `read_file` — reads text file contents up to 512 KB. No confirmation needed.
+  - `write_file` — writes or overwrites a file. Requires `confirmed: true` in arguments.
+  - `run_command` — executes a shell command (macOS, Linux, Windows). Requires `confirmed: true` in arguments.
+- Read-only tools never prompt for approval. Write/exec tools require the AI to explicitly pass `confirmed: true`, which VS Code surfaces to the user before calling.
+- Command safety blocklist rejects catastrophic patterns: `rm -rf /`, `mkfs`, `dd if=`, `format C:`, fork bombs, `shutdown`/`reboot`.
+- `run_command` returns stdout + stderr + exit code even on non-zero exit, so errors are readable.
+- Cross-platform path resolution using `node:path.resolve` — works on macOS, Linux, and Windows.
+- Bumped server version to `26.3R1-S5`.
+
+---
+
 ## [26.3R1-S4] — 2026-04-12
 
 ### MCP Server

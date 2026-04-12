@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version: 26.3R1-S4
+Version: 26.3R1-S5
 Owner and Builder: Moshiko Nayman
 
 Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.
@@ -60,6 +60,11 @@ POST http://127.0.0.1:4000/mcp
 | `mirabilis_chat` | Send a prompt and get an AI response (provider + model selectable) |
 | `mirabilis_list_models` | List available models for a given provider |
 | `mirabilis_health` | Check readiness of all configured providers |
+| `system_info` | OS, platform, architecture, hostname, home dir, cwd |
+| `list_dir` | List files and directories at a path |
+| `read_file` | Read a file's text content (≤ 512 KB) |
+| `write_file` | Write/overwrite a file — requires `confirmed: true` |
+| `run_command` | Run a shell command (macOS/Linux/Windows) — requires `confirmed: true` |
 
 ### Connect from VS Code
 
