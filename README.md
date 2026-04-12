@@ -16,6 +16,27 @@ Open: http://localhost:3000
 
 `./run.sh` starts Mirabilis and launches all available local providers for direct switching from the UI.
 
+## Features
+
+| Category | Feature |
+|---|---|
+| **Chat** | Streaming AI chat with persistent local history |
+| **Chat** | File attachments per conversation |
+| **Chat** | Image messages (send/receive images in chat) |
+| **Providers** | Ollama, openai-compatible (llama-server), koboldcpp |
+| **Providers** | Live provider health check and model switching from the UI |
+| **Providers** | Pull and delete Ollama models from the UI |
+| **Image Generation** | Local image generation via image-service (port 7860) |
+| **Voice / TTS** | Text-to-speech using Piper; download models from the UI |
+| **Web Search** | Search the web from within a chat conversation |
+| **Remote Execution** | Connect to a remote server and run commands from the UI |
+| **System Monitor** | Live CPU/RAM utilization, hardware profile, system specs |
+| **Training / Memory** | Store training examples and memory entries; export dataset |
+| **MCP Client** | Connect to external MCP servers (Junos, Synology, Debian, etc.) with per-server approval policy |
+| **MCP Server** | Exposes Mirabilis as an MCP server to VS Code / GitHub Copilot / Claude Desktop |
+| **MCP Server** | System control tools: `system_info`, `list_dir`, `read_file`, `write_file`, `run_command` |
+| **MSQ Models** | Custom model family (Raw-8B, Pro-12B, Ultra-31B) tuned for Mirabilis |
+
 ## Canonical Providers
 
 - `ollama`
