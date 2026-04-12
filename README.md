@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version: 26.3R1-S3
+Version: 26.3R1-S4
 Owner and Builder: Moshiko Nayman
 
 Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.
@@ -25,11 +25,13 @@ Open: http://localhost:3000
 Run modes:
 
 ```bash
-./run.sh                  # UI mode (auto-start local providers)
+./run.sh                          # UI mode (auto-start local providers)
 ./run.sh ollama
 ./run.sh openai-compatible
 ./run.sh koboldcpp
 ./run.sh stop
+./run.sh --log                    # Any mode with live backend + MCP logs
+./run.sh ollama --log
 ```
 
 ## CPU / Core Usage
@@ -42,6 +44,53 @@ Override thread count:
 MIRABILIS_THREADS=8 ./run.sh openai-compatible
 MIRABILIS_THREADS=8 ./run.sh koboldcpp
 ```
+
+## MCP Server
+
+When running, Mirabilis exposes itself as an MCP server at:
+
+```
+POST http://127.0.0.1:4000/mcp
+```
+
+### Exposed tools
+
+| Tool | Description |
+|---|---|
+| `mirabilis_chat` | Send a prompt and get an AI response (provider + model selectable) |
+| `mirabilis_list_models` | List available models for a given provider |
+| `mirabilis_health` | Check readiness of all configured providers |
+
+### Connect from VS Code
+
+Add to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "mirabilis": {
+      "url": "http://127.0.0.1:4000/mcp",
+      "description": "Mirabilis local AI — start with ./run.sh first"
+    }
+  }
+}
+```
+
+Then ask Copilot Chat: `Use mirabilis_chat to explain BGP` or `Call mirabilis_health`.
+
+### Logging
+
+By default, no logs are written and no console output is produced.
+Pass `--log` to enable live terminal output and audit file (`backend/data/mcp-server-audit.jsonl`):
+
+```bash
+./run.sh --log
+```
+
+## MCP Client
+
+Mirabilis can also connect **to** external MCP servers (Junos, Synology, Debian, etc.) from the UI.
+Configure servers in the MCP panel in the app. Connections are stored in `backend/data/mcp-servers.json`.
 
 ## Project Structure
 

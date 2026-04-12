@@ -23,6 +23,7 @@ import {
 } from './storage/chatStore.js';
 import { getEffectiveModel, listModels, streamWithProvider } from './modelService.js';
 import { McpConnectorService } from './mcp/mcpConnectorService.js';
+import { createMcpServerHandler } from './mcp/mcpServer.js';
 
 const app = express();
 const upload = multer({
@@ -1902,8 +1903,24 @@ app.get('/api/uploads/:filename', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Mirabilis MCP Server endpoint ────────────────────────────────────────────
+// VS Code / Copilot / any MCP client can connect to POST /mcp and use
+// Mirabilis AI as MCP tools (mirabilis_chat, mirabilis_list_models, mirabilis_health).
+const mcpServerAuditLogPath = join(dirname(config.chatStorePath), 'mcp-server-audit.jsonl');
+const mcpServerHandler = createMcpServerHandler({
+  config,
+  streamWithProvider,
+  getEffectiveModel,
+  listModels,
+  auditLogPath: mcpServerAuditLogPath
+});
+app.post('/mcp', mcpServerHandler);
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 await ensureStoreFile(config.chatStorePath);
 
 app.listen(config.port, () => {
   console.log(`Backend listening on http://localhost:${config.port}`);
+  console.log(`MCP server endpoint: http://localhost:${config.port}/mcp`);
 });

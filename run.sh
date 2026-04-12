@@ -35,12 +35,23 @@ detect_thread_count() {
 
 THREADS="$(detect_thread_count)"
 
-# Parse arguments
-PROVIDER="${1:-ui}"  # default: let user choose from UI
+# Parse arguments — strip --log flag before provider detection
+MIRABILIS_LOG=0
+RAW_ARGS=("$@")
+FILTERED_ARGS=()
+for arg in "${RAW_ARGS[@]:-}"; do
+  if [[ "$arg" == "--log" ]]; then
+    MIRABILIS_LOG=1
+  else
+    FILTERED_ARGS+=("$arg")
+  fi
+done
+export MIRABILIS_LOG
+PROVIDER="${FILTERED_ARGS[0]:-ui}"
 
 usage() {
   cat <<'EOF'
-Usage: ./run.sh [provider]
+Usage: ./run.sh [provider] [--log]
 
 Providers:
   ui                 - Start app and choose provider from UI (default)
@@ -49,14 +60,16 @@ Providers:
   koboldcpp          - Use KoboldCpp provider
   stop               - Stop all Mirabilis/provider processes
 
+Flags:
+  --log              - Print live backend/MCP logs to terminal and write audit files
+
 Environment:
   MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)
 
 Example:
   ./run.sh
   ./run.sh ollama
-  ./run.sh openai-compatible
-  ./run.sh koboldcpp
+  ./run.sh openai-compatible --log
   ./run.sh stop
 
 EOF
@@ -364,7 +377,11 @@ echo "📦 Starting services..."
 # Backend
 cd "$BACKEND_DIR"
 export PORT=4000
-npm run dev > /tmp/backend.log 2>&1 &
+if [[ "$MIRABILIS_LOG" -eq 1 ]]; then
+  npm run dev 2>&1 | tee /tmp/backend.log &
+else
+  npm run dev > /tmp/backend.log 2>&1 &
+fi
 BACKEND_PID=$!
 sleep 2
 echo "   Backend: http://127.0.0.1:4000"

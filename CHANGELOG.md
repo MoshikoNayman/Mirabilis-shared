@@ -2,6 +2,40 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S4] — 2026-04-12
+
+### MCP Server
+
+- Mirabilis now exposes itself as an MCP server at `POST http://127.0.0.1:4000/mcp` (streamable-http transport).
+- Three tools available to any MCP client (VS Code, GitHub Copilot, Claude Desktop, etc.):
+  - `mirabilis_chat` — send a prompt, get an AI response; provider and model are selectable per call.
+  - `mirabilis_list_models` — list available models for a given provider.
+  - `mirabilis_health` — check readiness of all configured providers.
+- Session management with UUID session IDs per client connection.
+- Implementation: `backend/src/mcp/mcpServer.js`; mounted in `server.js` at start.
+
+### Provider Adapter Modules
+
+- Added missing `backend/src/providers/ollama.js` — Ollama model discovery and streaming chat.
+- Added missing `backend/src/providers/openaiCompatible.js` — OpenAI-compatible API streaming and model listing (`listOpenAICompatibleModels` + `streamOpenAICompatibleChat`).
+- Both modules were previously absent, causing backend startup failure.
+
+### Logging Flag
+
+- All logging is **off by default** — no files written, no console noise.
+- New `--log` flag for `run.sh` enables:
+  - Live `[MCP-SERVER]` output in terminal for every session and tool call.
+  - `backend/data/mcp-server-audit.jsonl` audit file (JSONL, one event per line).
+- Flag works in any position: `./run.sh --log`, `./run.sh ollama --log`.
+- `MIRABILIS_LOG` env var drives the same behavior for direct node invocations.
+
+### run.sh — Backend Output
+
+- Backend output is silent by default (`> /tmp/backend.log 2>&1`).
+- With `--log`: backend pipes through `tee` so output appears in terminal and is saved to log simultaneously.
+
+---
+
 ## [26.3R1-S3] — 2026-04-10
 
 ### MSQ Model Family
