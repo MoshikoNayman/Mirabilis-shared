@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S9] — 2026-04-12
+
+### MSQ Model Setup Reliability
+
+- Hardened `training/msq/setup.sh` for easier recovery when MSQ models fail to install.
+- Added preflight checks for Ollama CLI presence and daemon availability.
+- Added automatic base-model pull before each `ollama create` step.
+- Added lighter install mode: `--skip-ultra` / `--lite` (or `MSQ_SKIP_ULTRA=1`) to skip the large Ultra model.
+- Improved error messages with actionable guidance for pull/create failures.
+
+---
+
 ## [26.3R1-S8] — 2026-04-12
 
 ### JS Launcher Enhancements
