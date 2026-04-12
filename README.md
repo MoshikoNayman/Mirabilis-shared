@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version: 26.3R1-S7
+Version: 26.3R1-S8
 Owner and Builder: Moshiko Nayman
 
 Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.
@@ -16,7 +16,8 @@ Open: http://localhost:3000
 
 `./run.sh` starts Mirabilis and launches all available local providers for direct switching from the UI.
 
-`run.sh` now acts as a safe fallback wrapper that delegates to `run.js`.
+`run.js` is the launcher source of truth.
+`run.sh` is kept as safe-mode fallback wrapper and delegates to `run.js`.
 
 ## Features
 
@@ -53,12 +54,16 @@ Run modes:
 ./run.sh openai-compatible
 ./run.sh koboldcpp
 ./run.sh stop
+./run.sh doctor
+./run.sh restart
 ./run.sh --log                    # Any mode with live backend + MCP logs
 ./run.sh ollama --log
 
 # Direct JavaScript launcher (same behavior)
 node run.js
 node run.js ollama
+node run.js doctor
+node run.js restart openai-compatible --log
 node run.js stop
 ```
 

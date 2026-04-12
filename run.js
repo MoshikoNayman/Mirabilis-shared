@@ -14,6 +14,7 @@ const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
 const IMAGE_SERVICE_DIR = path.join(ROOT_DIR, 'image-service');
 const PROVIDERS_DIR = path.join(ROOT_DIR, 'providers');
 const MODEL_PATH = path.join(os.tmpdir(), 'mirabilis-llama-3.2-1b-instruct-q4_k_m.gguf');
+const RUN_STATE_PATH = path.join(os.tmpdir(), 'mirabilis-run-state.json');
 
 let ollamaStartedByScript = false;
 const managed = {
@@ -26,7 +27,7 @@ const managed = {
 };
 
 function usage() {
-  process.stdout.write(`Usage: ./run.sh [provider] [--log]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n  stop               - Stop all Mirabilis/provider processes\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log\n  ./run.sh stop\n\n`);
+  process.stdout.write(`Usage: ./run.sh [provider|command] [--log]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log\n  ./run.sh doctor\n  ./run.sh restart koboldcpp --log\n  ./run.sh stop\n\n`);
 }
 
 function parseArgs(argv) {
@@ -39,16 +40,89 @@ function parseArgs(argv) {
       filtered.push(arg);
     }
   }
-  const provider = filtered[0] || 'ui';
-  return { provider, logEnabled };
+  const mode = filtered[0] || 'ui';
+  const arg = filtered[1] || '';
+  return { mode, arg, logEnabled };
 }
 
 function normalizeProvider(raw) {
   const value = String(raw || 'ui').toLowerCase();
-  if (['ui', 'ollama', 'openai-compatible', 'koboldcpp', 'stop'].includes(value)) {
+  if (['ui', 'ollama', 'openai-compatible', 'koboldcpp'].includes(value)) {
     return value;
   }
   return '';
+}
+
+async function readRunState() {
+  try {
+    const text = await fsp.readFile(RUN_STATE_PATH, 'utf8');
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function writeRunState(extra = {}) {
+  const pids = {};
+  for (const [name, proc] of Object.entries(managed)) {
+    if (proc && typeof proc.pid === 'number') {
+      pids[name] = proc.pid;
+    }
+  }
+  const payload = {
+    rootDir: ROOT_DIR,
+    updatedAt: new Date().toISOString(),
+    pids,
+    ...extra
+  };
+  await fsp.writeFile(RUN_STATE_PATH, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+async function clearRunState() {
+  try {
+    await fsp.unlink(RUN_STATE_PATH);
+  } catch {
+    // Ignore missing state.
+  }
+}
+
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function terminatePid(pid) {
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return false;
+
+  if (process.platform === 'win32') {
+    await runForeground('taskkill', ['/PID', String(pid), '/T', '/F'], ROOT_DIR);
+    return true;
+  }
+
+  if (!isPidAlive(pid)) return false;
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return false;
+  }
+
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return true;
+    await sleep(200);
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // Ignore if already gone.
+  }
+  return true;
 }
 
 function detectThreadCount() {
@@ -82,6 +156,15 @@ async function endpointReady(url) {
   } catch {
     return false;
   }
+}
+
+async function waitForEndpoint(url, timeoutMs, label) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await endpointReady(url)) return;
+    await sleep(1000);
+  }
+  throw new Error(`${label} did not become ready at ${url}`);
 }
 
 function ensureDeps() {
@@ -264,16 +347,70 @@ function runForeground(command, args, cwd) {
 
 async function stopAll() {
   process.stdout.write('Stopping Mirabilis and provider processes...\n');
-  if (process.platform === 'win32') {
-    await runForeground('taskkill', ['/F', '/IM', 'node.exe'], ROOT_DIR);
-    await runForeground('taskkill', ['/F', '/IM', 'python.exe'], ROOT_DIR);
-    await runForeground('taskkill', ['/F', '/IM', 'llama-server.exe'], ROOT_DIR);
-    await runForeground('taskkill', ['/F', '/IM', 'koboldcpp.exe'], ROOT_DIR);
-    await runForeground('taskkill', ['/F', '/IM', 'ollama.exe'], ROOT_DIR);
-  } else {
-    await runForeground('pkill', ['-f', 'node --watch src/server.js|next dev|python server.py|llama-server|koboldcpp|ollama serve'], ROOT_DIR);
+  let stoppedAny = false;
+
+  const state = await readRunState();
+  const pidValues = Object.values(state?.pids || {}).filter((pid) => Number.isInteger(pid));
+  for (const pid of pidValues) {
+    const stopped = await terminatePid(pid);
+    stoppedAny = stoppedAny || stopped;
   }
+
+  if (!stoppedAny) {
+    process.stdout.write('No active PID state found; using fallback pattern stop.\n');
+    if (process.platform === 'win32') {
+      await runForeground('taskkill', ['/F', '/IM', 'llama-server.exe'], ROOT_DIR);
+      await runForeground('taskkill', ['/F', '/IM', 'koboldcpp.exe'], ROOT_DIR);
+      await runForeground('taskkill', ['/F', '/IM', 'ollama.exe'], ROOT_DIR);
+      await runForeground('taskkill', ['/F', '/IM', 'python.exe'], ROOT_DIR);
+      await runForeground('taskkill', ['/F', '/IM', 'node.exe'], ROOT_DIR);
+    } else {
+      await runForeground('pkill', ['-f', 'node --watch src/server.js|next dev|python server.py|llama-server|koboldcpp|ollama serve'], ROOT_DIR);
+    }
+  }
+
+  await clearRunState();
   process.stdout.write('Stopped\n');
+}
+
+async function runDoctor() {
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail });
+
+  add('backend node_modules', fs.existsSync(path.join(BACKEND_DIR, 'node_modules')), path.join(BACKEND_DIR, 'node_modules'));
+  add('frontend node_modules', fs.existsSync(path.join(FRONTEND_DIR, 'node_modules')), path.join(FRONTEND_DIR, 'node_modules'));
+
+  const pyPath = imagePythonPath();
+  add('image-service python venv', fs.existsSync(pyPath), pyPath);
+
+  const llamaBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
+  const koboldBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'koboldcpp.exe' : 'koboldcpp');
+  add('llama-server binary', fs.existsSync(llamaBin), llamaBin);
+  add('koboldcpp binary', fs.existsSync(koboldBin), koboldBin);
+
+  const hasOllama = await commandExists('ollama');
+  add('ollama command in PATH', hasOllama, hasOllama ? 'available' : 'not found');
+  add('ollama endpoint', await endpointReady('http://127.0.0.1:11434/api/tags'), 'http://127.0.0.1:11434/api/tags');
+
+  add('backend endpoint', await endpointReady('http://127.0.0.1:4000/health'), 'http://127.0.0.1:4000/health');
+  add('frontend endpoint', await endpointReady('http://127.0.0.1:3000'), 'http://127.0.0.1:3000');
+  add('image endpoint', await endpointReady('http://127.0.0.1:7860/health'), 'http://127.0.0.1:7860/health');
+
+  process.stdout.write('Mirabilis doctor report:\n');
+  for (const c of checks) {
+    process.stdout.write(`  ${c.ok ? '[OK]' : '[WARN]'} ${c.name} - ${c.detail}\n`);
+  }
+
+  process.stdout.write(`  [INFO] thread count default - ${detectThreadCount()}\n`);
+  process.stdout.write(`  [INFO] run state file - ${RUN_STATE_PATH}\n`);
+
+  const failed = checks.filter((c) => !c.ok).length;
+  if (failed > 0) {
+    process.stdout.write(`Doctor completed with ${failed} warning(s).\n`);
+    process.exitCode = 1;
+  } else {
+    process.stdout.write('Doctor completed successfully.\n');
+  }
 }
 
 function cleanup() {
@@ -285,27 +422,40 @@ function cleanup() {
   if (ollamaStartedByScript && managed.ollama && !managed.ollama.killed) {
     try { managed.ollama.kill('SIGTERM'); } catch { /* ignore */ }
   }
+  void clearRunState();
 }
 
 async function main() {
-  const { provider: rawProvider, logEnabled } = parseArgs(process.argv.slice(2));
+  const { mode, arg, logEnabled } = parseArgs(process.argv.slice(2));
   process.env.MIRABILIS_LOG = logEnabled ? '1' : '0';
 
-  if (rawProvider === '-h' || rawProvider === '--help') {
+  if (mode === '-h' || mode === '--help') {
     usage();
     return;
   }
 
-  const provider = normalizeProvider(rawProvider);
+  if (mode === 'doctor') {
+    await runDoctor();
+    return;
+  }
+
+  if (mode === 'stop') {
+    await stopAll();
+    return;
+  }
+
+  const isRestart = mode === 'restart';
+  const providerCandidate = isRestart ? (arg || 'ui') : mode;
+  const provider = normalizeProvider(providerCandidate);
   if (!provider) {
-    process.stderr.write('Unknown provider. Use one of: ui, ollama, openai-compatible, koboldcpp, stop\n');
+    process.stderr.write('Unknown mode/provider. Use one of: ui, ollama, openai-compatible, koboldcpp, stop, restart, doctor\n');
     usage();
     process.exit(1);
   }
 
-  if (provider === 'stop') {
+  if (isRestart) {
+    process.stdout.write(`Restart requested (provider=${provider})\n`);
     await stopAll();
-    return;
   }
 
   ensureDeps();
@@ -383,17 +533,20 @@ async function main() {
 
   process.stdout.write('\nStarting services...\n');
   managed.backend = spawnLogged(npmCommand(), ['run', 'dev'], BACKEND_DIR, env, path.join(os.tmpdir(), 'backend.log'), logEnabled);
-  await sleep(2000);
+  await waitForEndpoint('http://127.0.0.1:4000/health', 45000, 'Backend');
   process.stdout.write('  Backend: http://127.0.0.1:4000\n');
+  await writeRunState({ provider: aiProvider, logging: logEnabled });
 
   managed.frontend = spawnLogged(npmCommand(), ['run', 'dev'], FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
-  await sleep(3000);
+  await waitForEndpoint('http://127.0.0.1:3000', 60000, 'Frontend');
   process.stdout.write('  Frontend: http://127.0.0.1:3000\n');
+  await writeRunState({ provider: aiProvider, logging: logEnabled });
 
   const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860' };
   managed.image = spawnLogged(imagePythonPath(), ['server.py'], IMAGE_SERVICE_DIR, imageEnv, path.join(os.tmpdir(), 'image-service.log'), false);
-  await sleep(2000);
+  await waitForEndpoint('http://127.0.0.1:7860/health', 240000, 'Image service');
   process.stdout.write('  Image Service: http://127.0.0.1:7860\n');
+  await writeRunState({ provider: aiProvider, logging: logEnabled });
 
   process.stdout.write('\nMirabilis is running\n');
   process.stdout.write('Open: http://localhost:3000\n');

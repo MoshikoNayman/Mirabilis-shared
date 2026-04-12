@@ -2,6 +2,19 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S8] — 2026-04-12
+
+### JS Launcher Enhancements
+
+- Added `doctor` command to `run.js` / `run.sh` wrapper for quick environment and endpoint validation.
+- Added `restart [provider]` command for one-shot stop/start cycles.
+- Added deterministic stop behavior using PID state file (`mirabilis-run-state.json`) instead of relying only on broad process pattern matching.
+- Kept fallback behavior: if no PID state is found, launcher still uses legacy pattern-based stop.
+- Added startup readiness supervision for backend (`/health`), frontend (`/`), and image service (`/health`) with explicit timeouts and clear errors.
+- Maintained safe-mode architecture: `run.js` is source of truth; `run.sh` remains a thin compatibility wrapper.
+
+---
+
 ## [26.3R1-S7] — 2026-04-12
 
 ### Launcher Bug Fixes
