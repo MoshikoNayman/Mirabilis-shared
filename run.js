@@ -93,7 +93,7 @@ function printStartupSummary(provider, verbose) {
 }
 
 function usage() {
-  process.stdout.write(`Usage: ./run.sh [provider|command] [args] [--log] [--verbose]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log --verbose\n  ./run.sh doctor\n  ./run.sh logs\n  ./run.sh restart koboldcpp --log\n  ./run.sh install\n  ./run.sh uninstall\n  ./run.sh stop\n\n`);
+  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
 }
 
 function parseArgs(argv) {
@@ -1129,7 +1129,7 @@ async function main() {
 
 main().catch((error) => {
   statusLine('FAIL', error.message || 'Launcher failed');
-  statusLine('INFO', 'Try: ./run.sh doctor');
+  statusLine('INFO', 'Try: node run.js doctor');
   cleanup();
   process.exit(1);
 });
