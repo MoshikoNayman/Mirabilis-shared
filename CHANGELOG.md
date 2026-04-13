@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S21] — 2026-04-12
+
+### Auto-Install on Startup
+
+- **Zero-touch install**: `node run.js` now auto-installs dependencies if missing, instead of failing with an error.
+- **Seamless UX**: Fresh clone → `node run.js` → instant startup, no intermediate `node run.js install` needed.
+- **Pre-flight check**: Detects missing backend/frontend node_modules or Python venv before startup begins.
+- **Impact**: Reduces friction for new users; fresh clones now "just work."
+
+---
+
 ## [26.3R1-S20] — 2026-04-12
 
 ### Auto-Create Missing Backend Provider Adapters

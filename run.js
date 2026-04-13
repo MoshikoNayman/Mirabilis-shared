@@ -996,6 +996,17 @@ async function main() {
     await stopAll();
   }
 
+  // Check if deps exist, auto-install if missing
+  const depsExist = fs.existsSync(path.join(BACKEND_DIR, 'node_modules')) &&
+                    fs.existsSync(path.join(FRONTEND_DIR, 'node_modules')) &&
+                    (fs.existsSync(path.join(IMAGE_SERVICE_DIR, '.venv', 'bin', 'python')) ||
+                     fs.existsSync(path.join(IMAGE_SERVICE_DIR, '.venv', 'Scripts', 'python.exe')));
+
+  if (!depsExist) {
+    statusLine('INFO', 'Dependencies missing. Running auto-install...');
+    await withPhase('Install', runInstall);
+  }
+
   await withPhase('Preflight', async () => {
     ensureDeps();
     if (verbose) {
