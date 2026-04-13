@@ -481,6 +481,10 @@ async function runInstall() {
   // Provider binaries (macOS only for auto-install)
   if (process.platform === 'darwin') {
     statusLine('INFO', 'Installing provider runtimes (macOS detected)...');
+    // Ensure providers directory exists
+    if (!fs.existsSync(PROVIDERS_DIR)) {
+      fs.mkdirSync(PROVIDERS_DIR, { recursive: true });
+    }
     const arch = process.arch;
 
     // llama-server
@@ -540,10 +544,179 @@ async function runInstall() {
     }
   } else {
     statusLine('WARN', 'Non-macOS detected. Provider runtime auto-install skipped.');
+    // Ensure providers directory exists anyway (for manual installs)
+    if (!fs.existsSync(PROVIDERS_DIR)) {
+      fs.mkdirSync(PROVIDERS_DIR, { recursive: true });
+    }
   }
 
   // Validation
   statusLine('INFO', 'Validating installation...');
+  
+  // Ensure backend provider adapters exist
+  const backendProvidersDir = path.join(BACKEND_DIR, 'src', 'providers');
+  if (!fs.existsSync(backendProvidersDir)) {
+    fs.mkdirSync(backendProvidersDir, { recursive: true });
+  }
+
+  const ollamaProviderFile = path.join(backendProvidersDir, 'ollama.js');
+  const openaiProviderFile = path.join(backendProvidersDir, 'openaiCompatible.js');
+
+  // Create ollama provider if missing
+  if (!fs.existsSync(ollamaProviderFile)) {
+    const ollamaCode = `// Ollama provider adapter for local LLM chat
+
+const OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
+
+export async function listOllamaModels() {
+  try {
+    const res = await fetch(\`\${OLLAMA_BASE_URL}/api/tags\`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.models || []).map(m => ({
+      id: m.name,
+      name: m.name,
+      size: m.size ? \`\${(m.size / 1e9).toFixed(1)} GB\` : 'unknown'
+    }));
+  } catch (error) {
+    console.error('Failed to list Ollama models:', error.message);
+    return [];
+  }
+}
+
+export async function streamOllamaChat(messages, modelId, onChunk) {
+  const payload = {
+    model: modelId,
+    messages: messages.map(m => ({
+      role: m.role,
+      content: m.content
+    })),
+    stream: true
+  };
+
+  try {
+    const res = await fetch(\`\${OLLAMA_BASE_URL}/api/chat\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      throw new Error(\`Ollama API error: \${res.status}\`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const json = JSON.parse(line);
+          if (json.message?.content) {
+            onChunk(json.message.content);
+          }
+        } catch {
+          // Ignore JSON parse errors for partial lines
+        }
+      }
+    }
+  } catch (error) {
+    onChunk(\`\\n[Ollama error: \${error.message}]\`);
+  }
+}
+`;
+    await fsp.writeFile(ollamaProviderFile, ollamaCode, 'utf8');
+    statusLine('OK', 'Created backend provider: ollama.js');
+  }
+
+  // Create OpenAI-compatible provider if missing
+  if (!fs.existsSync(openaiProviderFile)) {
+    const openaiCode = `// OpenAI-compatible provider adapter (llama-server, compatible APIs)
+
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'http://127.0.0.1:8000/v1';
+
+export async function listOpenAICompatibleModels() {
+  try {
+    const res = await fetch(\`\${OPENAI_BASE_URL}/models\`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.data || []).map(m => ({
+      id: m.id,
+      name: m.id,
+      owned_by: m.owned_by || 'unknown'
+    }));
+  } catch (error) {
+    console.error('Failed to list OpenAI-compatible models:', error.message);
+    return [];
+  }
+}
+
+export async function streamOpenAICompatibleChat(messages, modelId, onChunk) {
+  const payload = {
+    model: modelId,
+    messages: messages.map(m => ({
+      role: m.role,
+      content: m.content
+    })),
+    stream: true
+  };
+
+  try {
+    const res = await fetch(\`\${OPENAI_BASE_URL}/chat/completions\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      throw new Error(\`OpenAI-compatible API error: \${res.status}\`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim() || line.trim() === '[DONE]') continue;
+        if (!line.startsWith('data: ')) continue;
+
+        try {
+          const json = JSON.parse(line.slice(6));
+          const delta = json.choices?.[0]?.delta?.content;
+          if (delta) {
+            onChunk(delta);
+          }
+        } catch {
+          // Ignore JSON parse errors for partial lines
+        }
+      }
+    }
+  } catch (error) {
+    onChunk(\`\\n[OpenAI-compatible error: \${error.message}]\`);
+  }
+}
+`;
+    await fsp.writeFile(openaiProviderFile, openaiCode, 'utf8');
+    statusLine('OK', 'Created backend provider: openaiCompatible.js');
+  }
+  
   let validationFailed = false;
 
   if (!fs.existsSync(path.join(BACKEND_DIR, 'node_modules'))) {
@@ -558,6 +731,16 @@ async function runInstall() {
 
   if (!fs.existsSync(imagePythonPath())) {
     statusLine('FAIL', 'Python venv not set up');
+    validationFailed = true;
+  }
+
+  if (!fs.existsSync(ollamaProviderFile)) {
+    statusLine('FAIL', 'Backend provider: ollama.js missing');
+    validationFailed = true;
+  }
+
+  if (!fs.existsSync(openaiProviderFile)) {
+    statusLine('FAIL', 'Backend provider: openaiCompatible.js missing');
     validationFailed = true;
   }
 

@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S20] — 2026-04-12
+
+### Auto-Create Missing Backend Provider Adapters
+
+- **Created provider adapters**: Added `backend/src/providers/ollama.js` and `openaiCompatible.js` (were missing from repo).
+- **Seamless install**: `node run.js install` now auto-creates these files if they don't exist during the validation phase.
+- **Dir creation**: Also ensures `providers/` directory exists before downloading binaries.
+- **Impact**: Fixes "Cannot find module" error when cloning fresh repo. Install is now fully self-healing.
+
+---
+
 ## [26.3R1-S19] — 2026-04-12
 
 ### Cutover Complete: Pure JavaScript Autonomy
@@ -19,6 +30,7 @@ Versioning follows Junos-style tags.
 ---
 
 ## [26.3R1-S18] — 2026-04-12
+
 
 ### Logs Command for Real-Time Diagnostics
 
