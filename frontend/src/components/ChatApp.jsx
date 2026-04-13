@@ -3954,12 +3954,14 @@ export default function ChatApp() {
                                       <span className="animate-pulse text-[10px] text-accent">
                                         {pulling.pct !== null ? `${pulling.pct}%` : '…'}
                                       </span>
-                                      <button
-                                        type="button"
+                                      <span
+                                        role="button"
+                                        tabIndex={0}
                                         onClick={(e) => { e.stopPropagation(); cancelInstall(item.id); }}
-                                        className="ml-0.5 rounded px-1 text-[10px] text-red-400 hover:text-red-600"
+                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); cancelInstall(item.id); } }}
+                                        className="ml-0.5 cursor-pointer rounded px-1 text-[10px] text-red-400 hover:text-red-600"
                                         title="Cancel install"
-                                      >✕</button>
+                                      >✕</span>
                                     </div>
                                   ) : (
                                     <span className="ml-2 shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
