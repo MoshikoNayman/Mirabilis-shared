@@ -2,9 +2,10 @@
 
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 
-export async function listOllamaModels() {
+export async function listOllamaModels(baseUrl) {
+  const base = baseUrl || OLLAMA_BASE_URL;
   try {
-    const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
+    const res = await fetch(`${base}/api/tags`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.models || []).map(m => ({
@@ -18,21 +19,25 @@ export async function listOllamaModels() {
   }
 }
 
-export async function streamOllamaChat(messages, modelId, onChunk) {
+export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, temperature, maxTokens }) {
+  const base = baseUrl || OLLAMA_BASE_URL;
   const payload = {
-    model: modelId,
+    model,
     messages: messages.map(m => ({
       role: m.role,
       content: m.content
     })),
-    stream: true
+    stream: true,
+    ...(temperature != null ? { options: { temperature } } : {}),
+    ...(maxTokens != null ? { options: { ...(temperature != null ? { temperature } : {}), num_predict: maxTokens } } : {}),
   };
 
   try {
-    const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal,
     });
 
     if (!res.ok) {
@@ -56,7 +61,7 @@ export async function streamOllamaChat(messages, modelId, onChunk) {
         try {
           const json = JSON.parse(line);
           if (json.message?.content) {
-            onChunk(json.message.content);
+            onToken(json.message.content);
           }
         } catch {
           // Ignore JSON parse errors for partial lines
@@ -64,6 +69,6 @@ export async function streamOllamaChat(messages, modelId, onChunk) {
       }
     }
   } catch (error) {
-    onChunk(`\n[Ollama error: ${error.message}]`);
+    if (error.name !== 'AbortError') onToken(`\n[Ollama error: ${error.message}]`);
   }
 }

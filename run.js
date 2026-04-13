@@ -568,9 +568,10 @@ async function runInstall() {
 
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 
-export async function listOllamaModels() {
+export async function listOllamaModels(baseUrl) {
+  const base = baseUrl || OLLAMA_BASE_URL;
   try {
-    const res = await fetch(\`\${OLLAMA_BASE_URL}/api/tags\`);
+    const res = await fetch(\`\${base}/api/tags\`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.models || []).map(m => ({
@@ -584,21 +585,25 @@ export async function listOllamaModels() {
   }
 }
 
-export async function streamOllamaChat(messages, modelId, onChunk) {
+export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, temperature, maxTokens }) {
+  const base = baseUrl || OLLAMA_BASE_URL;
   const payload = {
-    model: modelId,
+    model,
     messages: messages.map(m => ({
       role: m.role,
       content: m.content
     })),
-    stream: true
+    stream: true,
+    ...(temperature != null ? { options: { temperature } } : {}),
+    ...(maxTokens != null ? { options: { ...(temperature != null ? { temperature } : {}), num_predict: maxTokens } } : {}),
   };
 
   try {
-    const res = await fetch(\`\${OLLAMA_BASE_URL}/api/chat\`, {
+    const res = await fetch(\`\${base}/api/chat\`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal,
     });
 
     if (!res.ok) {
@@ -622,7 +627,7 @@ export async function streamOllamaChat(messages, modelId, onChunk) {
         try {
           const json = JSON.parse(line);
           if (json.message?.content) {
-            onChunk(json.message.content);
+            onToken(json.message.content);
           }
         } catch {
           // Ignore JSON parse errors for partial lines
@@ -630,7 +635,7 @@ export async function streamOllamaChat(messages, modelId, onChunk) {
       }
     }
   } catch (error) {
-    onChunk(\`\\n[Ollama error: \${error.message}]\`);
+    if (error.name !== 'AbortError') onToken(\`\\n[Ollama error: \${error.message}]\`);
   }
 }
 `;
@@ -644,9 +649,10 @@ export async function streamOllamaChat(messages, modelId, onChunk) {
 
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'http://127.0.0.1:8000/v1';
 
-export async function listOpenAICompatibleModels() {
+export async function listOpenAICompatibleModels(baseUrl) {
+  const base = baseUrl || OPENAI_BASE_URL;
   try {
-    const res = await fetch(\`\${OPENAI_BASE_URL}/models\`);
+    const res = await fetch(\`\${base}/models\`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.data || []).map(m => ({
@@ -660,21 +666,28 @@ export async function listOpenAICompatibleModels() {
   }
 }
 
-export async function streamOpenAICompatibleChat(messages, modelId, onChunk) {
+export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens }) {
+  const base = baseUrl || OPENAI_BASE_URL;
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = \`Bearer \${apiKey}\`;
+
   const payload = {
-    model: modelId,
+    model,
     messages: messages.map(m => ({
       role: m.role,
       content: m.content
     })),
-    stream: true
+    stream: true,
+    ...(temperature != null ? { temperature } : {}),
+    ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
   };
 
   try {
-    const res = await fetch(\`\${OPENAI_BASE_URL}/chat/completions\`, {
+    const res = await fetch(\`\${base}/chat/completions\`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers,
+      body: JSON.stringify(payload),
+      signal,
     });
 
     if (!res.ok) {
@@ -698,6 +711,21 @@ export async function streamOpenAICompatibleChat(messages, modelId, onChunk) {
         if (!line.startsWith('data: ')) continue;
 
         try {
+          const json = JSON.parse(line.slice(6));
+          const delta = json.choices?.[0]?.delta?.content;
+          if (delta) {
+            onToken(delta);
+          }
+        } catch {
+          // Ignore JSON parse errors for partial lines
+        }
+      }
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') onToken(\`\\n[OpenAI-compatible error: \${error.message}]\`);
+  }
+}
+`;
           const json = JSON.parse(line.slice(6));
           const delta = json.choices?.[0]?.delta?.content;
           if (delta) {

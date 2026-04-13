@@ -2,9 +2,10 @@
 
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'http://127.0.0.1:8000/v1';
 
-export async function listOpenAICompatibleModels() {
+export async function listOpenAICompatibleModels(baseUrl) {
+  const base = baseUrl || OPENAI_BASE_URL;
   try {
-    const res = await fetch(`${OPENAI_BASE_URL}/models`);
+    const res = await fetch(`${base}/models`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.data || []).map(m => ({
@@ -18,21 +19,28 @@ export async function listOpenAICompatibleModels() {
   }
 }
 
-export async function streamOpenAICompatibleChat(messages, modelId, onChunk) {
+export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens }) {
+  const base = baseUrl || OPENAI_BASE_URL;
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
   const payload = {
-    model: modelId,
+    model,
     messages: messages.map(m => ({
       role: m.role,
       content: m.content
     })),
-    stream: true
+    stream: true,
+    ...(temperature != null ? { temperature } : {}),
+    ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
   };
 
   try {
-    const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+    const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers,
+      body: JSON.stringify(payload),
+      signal,
     });
 
     if (!res.ok) {
@@ -59,7 +67,7 @@ export async function streamOpenAICompatibleChat(messages, modelId, onChunk) {
           const json = JSON.parse(line.slice(6));
           const delta = json.choices?.[0]?.delta?.content;
           if (delta) {
-            onChunk(delta);
+            onToken(delta);
           }
         } catch {
           // Ignore JSON parse errors for partial lines
@@ -67,6 +75,6 @@ export async function streamOpenAICompatibleChat(messages, modelId, onChunk) {
       }
     }
   } catch (error) {
-    onChunk(`\n[OpenAI-compatible error: ${error.message}]`);
+    if (error.name !== 'AbortError') onToken(`\n[OpenAI-compatible error: ${error.message}]`);
   }
 }
