@@ -1,9 +1,11 @@
 # Mirabilis AI
 
-Version: 26.3R1-S21
-Owner and Builder: Moshiko Nayman
+**Version:** 26.3R1-S24  
+**Author:** Moshiko Nayman
 
-Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.
+Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API—your choice, per conversation.
+
+---
 
 ## Quick Start
 
@@ -12,138 +14,148 @@ node run.js install
 node run.js
 ```
 
-Ollama is a required runtime for the default `ui` startup flow.
+Open: **http://localhost:3000**
 
-Open: http://localhost:3000
+`node run.js install` installs all dependencies (npm + Python venv). `node run.js` starts the backend, frontend, image service, and any configured local providers. No shell scripts required.
 
-`node run.js` starts Mirabilis and launches all available local providers for direct switching from the UI.
+---
+
+## AI Providers
+
+Mirabilis supports local and remote providers, switchable live from the UI. Configure base URL and API key per provider in the **Configure endpoint** panel.
+
+### Local Providers
+
+| Provider | Description | Startup |
+|---|---|---|
+| **Ollama** | Default local inference engine. Pull and manage models from the UI. | `node run.js ollama` |
+| **Local/Custom Endpoint** | Any OpenAI-compatible local server: LM Studio, llama-server, llama.cpp, Oobabooga, etc. | `node run.js openai-compatible` |
+| **KoboldCpp** | KoboldCpp local engine (separate install required). | `node run.js koboldcpp` |
+
+### Remote Providers
+
+All remote providers require an API key. Configure in the **Configure endpoint** panel inside the app.
+
+| Provider | Base URL | Free Tier | Key Format |
+|---|---|---|---|
+| **OpenAI** | `https://api.openai.com/v1` | No | `sk-...` |
+| **Grok** (xAI) | `https://api.x.ai/v1` | No | `xai-...` |
+| **Groq** | `https://api.groq.com/openai/v1` | Yes | `gsk_...` |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | Yes | `sk-or-...` |
+| **Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | Yes | `AIza...` |
+| **Claude** (Anthropic) | `https://api.anthropic.com` | No | `sk-ant-...` |
+| **GPUaaS Endpoint** | Your endpoint URL | Varies | Provider-specific |
+
+> **GPUaaS Endpoint** works with any OpenAI-compatible GPU-as-a-service: Together AI, Fireworks, RunPod OpenAI proxy, vLLM gateway, and similar platforms. Enter the base URL and API key from your provider.
+
+### Provider UX
+
+- Dropdown shows **Local** / **Remote** scope under each provider name.
+- Per-provider hint banner in the config panel shows the expected base URL and key format.
+- **Estimated monthly budget bar** — set a USD budget; the bar tracks estimated token spend against it (shown for all remote providers).
+- **Auto model resolution** — selecting `auto` picks a sensible default model per provider (e.g. `gpt-4o-mini` for OpenAI, `llama-3.1-8b-instant` for Groq, `openai/gpt-4o-mini` for OpenRouter).
+- **Stream stall watchdog** — aborts a stalled local stream after 120 s with a clear timeout message.
+- No forced fallback: if a remote provider is unreachable, an error is shown rather than silently switching to Ollama.
+
+---
 
 ## Commands
 
-All operations run pure JavaScript—no shell scripts required.
+All operations run pure JavaScript — no shell scripts required.
 
 ```
-node run.js                        # Start with UI provider selection
+node run.js                        # Start (UI provider selection)
 node run.js ollama                 # Start with Ollama
 node run.js openai-compatible      # Start with llama-server
 node run.js koboldcpp              # Start with KoboldCpp
-node run.js install                # Install/reinstall dependencies
+node run.js install                # Install / reinstall all dependencies
 node run.js uninstall              # Remove dependencies and caches
-node run.js stop                   # Stop running services
+node run.js stop                   # Stop all running services
 node run.js restart [provider]     # Restart services
 node run.js doctor                 # Validate environment
 node run.js logs                   # Real-time log tail (for debugging)
 node run.js --help                 # Show full help
 ```
 
-## Flags
+### Flags
 
 ```
 --log                 # Stream backend logs to terminal
 --verbose             # Extended startup diagnostics
 ```
 
-## Examples
+### Examples
 
 ```bash
-node run.js                        # Default: choose provider from UI
-node run.js ollama --verbose       # Start with Ollama + detailed output
-node run.js restart openai-compatible --log  # Restart with OpenAI-compatible + logs
-node run.js logs                   # Debug: watch real-time service logs
-node run.js doctor                 # Check environment health
+node run.js                                    # Default: choose provider in UI
+node run.js ollama --verbose                   # Ollama + detailed diagnostics
+node run.js restart openai-compatible --log    # Restart + live log tail
+node run.js logs                               # Watch all service logs
+node run.js doctor                             # Check environment health
 ```
+
+---
 
 ## Verification
 
 ```bash
 node run.js doctor
-node run.js logs &          # Background
-node run.js --verbose       # In another terminal
 curl -sS http://127.0.0.1:4000/health
 curl -sS http://127.0.0.1:4000/api/models
-curl -sS http://127.0.0.1:4000/api/models/install-jobs
+curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 ```
 
-## Architecture
-
-Mirabilis is 100% pure JavaScript for the launcher and all lifecycle operations:
-- **Installation**: `node run.js install` — validates prerequisites, installs npm/Python deps, downloads provider binaries
-- **Startup**: `node run.js [provider]` — orchestrates backend, frontend, image-service, and AI providers
-- **Lifecycle**: `stop`, `restart`, `doctor`, `logs`, `uninstall` — all pure JS, no shell scripts
-- **No shell dependencies** — works cross-platform without shell script fallbacks
-- **Autonomous** — fully self-contained; no shell wrappers required
-
-No shell scripts (`install.sh`, `run.sh`, `uninstall.sh`) are included in this repo. All operations via `node run.js`.
+---
 
 ## Features
 
 | Category | Feature |
 |---|---|
 | **Chat** | Streaming AI chat with persistent local history |
-| **Chat** | File attachments per conversation |
-| **Chat** | Image messages (send/receive images in chat) |
-| **Providers** | Ollama, openai-compatible (llama-server), koboldcpp |
-| **Providers** | Live provider health check and model switching from the UI |
-| **Providers** | Pull and delete Ollama models from the UI |
-| **Image Generation** | Local image generation via image-service (port 7860) |
-| **Voice / TTS** | Text-to-speech using Piper; download models from the UI |
-| **Web Search** | Search the web from within a chat conversation |
-| **Remote Execution** | Connect to a remote server and run commands from the UI |
+| **Chat** | File attachments and image messages per conversation |
+| **Chat** | Canvas mode, Deep Thinking mode, Guided Learning mode |
+| **Providers** | 10 providers: Ollama, OpenAI, Grok, Groq, OpenRouter, Gemini, Claude, GPUaaS, Custom Endpoint, KoboldCpp |
+| **Providers** | Live provider health check; switch provider per session from the UI |
+| **Providers** | Pull, delete, and monitor Ollama models from the UI |
+| **Providers** | Estimated remote spend tracker with configurable monthly budget |
+| **Image Generation** | Local image generation via image-service (Stable Diffusion, port 7860) |
+| **Voice / TTS** | Text-to-speech with Piper neural voices; download models from the UI |
+| **Voice / TTS** | Browser speech synthesis fallback; rate and pitch controls |
+| **Web Search** | Automatic web search classification; enriches answers with live results |
+| **Remote Execution** | SSH or local remote control — run commands and read files from the UI |
 | **System Monitor** | Live CPU/RAM utilization, hardware profile, system specs |
-| **Training / Memory** | Store training examples and memory entries; export dataset |
-| **MCP Client** | Connect to external MCP servers (Junos, Synology, Debian, etc.) with per-server approval policy |
+| **Training / Memory** | Personal memory store, fine-tuning examples, dataset export |
+| **MCP Client** | Connect to external MCP servers with per-server tool approval policy |
 | **MCP Server** | Exposes Mirabilis as an MCP server to VS Code / GitHub Copilot / Claude Desktop |
 | **MCP Server** | System control tools: `system_info`, `list_dir`, `read_file`, `write_file`, `run_command` |
 | **MSQ Models** | Custom model family (Raw-8B, Pro-12B, Ultra-31B) tuned for Mirabilis |
 
-## Canonical Providers
+---
 
-- `ollama`
-- `openai-compatible` (backed by local `llama-server`)
-- `koboldcpp`
-
-Run modes:
-
-```bash
-node run.js
-node run.js ollama
-node run.js openai-compatible
-node run.js koboldcpp
-node run.js stop
-node run.js doctor
-node run.js restart
-node run.js restart openai-compatible --log
-node run.js logs
-node run.js --log                 # Any mode with live backend + MCP logs
-node run.js ollama --log
-node run.js install
-node run.js uninstall
-```
-
-## CPU / Core Usage
+## CPU / Thread Control
 
 For `openai-compatible` and `koboldcpp`, Mirabilis uses all logical CPU cores by default.
-
-Override thread count:
 
 ```bash
 MIRABILIS_THREADS=8 node run.js openai-compatible
 MIRABILIS_THREADS=8 node run.js koboldcpp
 ```
 
+---
+
 ## MCP Server
 
-When running, Mirabilis exposes itself as an MCP server at:
+Mirabilis exposes itself as an MCP server at:
 
 ```
 POST http://127.0.0.1:4000/mcp
 ```
 
-### Exposed tools
+### Exposed Tools
 
 | Tool | Description |
 |---|---|
-| `mirabilis_chat` | Send a prompt and get an AI response (provider + model selectable) |
+| `mirabilis_chat` | Send a prompt and get a streaming AI response (provider + model selectable) |
 | `mirabilis_list_models` | List available models for a given provider |
 | `mirabilis_health` | Check readiness of all configured providers |
 | `system_info` | OS, platform, architecture, hostname, home dir, cwd |
@@ -169,34 +181,59 @@ Add to `.vscode/mcp.json`:
 
 Then ask Copilot Chat: `Use mirabilis_chat to explain BGP` or `Call mirabilis_health`.
 
-### Logging
+### Audit Logging
 
-By default, no logs are written and no console output is produced.
-Pass `--log` to enable live terminal output and audit file (`backend/data/mcp-server-audit.jsonl`):
+Pass `--log` to enable live terminal output and write an audit log to `backend/data/mcp-server-audit.jsonl`:
 
 ```bash
 node run.js --log
 ```
 
+---
+
 ## MCP Client
 
-Mirabilis can also connect **to** external MCP servers (Junos, Synology, Debian, etc.) from the UI.
-Configure servers in the MCP panel in the app. Connections are stored in `backend/data/mcp-servers.json`.
+Mirabilis can connect **to** external MCP servers (Junos, Synology, Debian, etc.) from the UI. Configure servers in the **MCP** panel. Connections are persisted in `backend/data/mcp-servers.json`.
 
-## Project Structure
+---
+
+## Architecture
+
+Mirabilis is 100% pure JavaScript for all launcher and lifecycle operations:
+
+- **Installation** — `node run.js install`: validates prerequisites, installs npm/Python deps, downloads provider binaries.
+- **Startup** — `node run.js [provider]`: orchestrates backend (Express, port 4000), frontend (Next.js, port 3000), image-service (port 7860), and local AI providers.
+- **Lifecycle** — `stop`, `restart`, `doctor`, `logs`, `uninstall`: all pure JS, no shell scripts.
+- **Self-healing** — auto-installs missing dependencies on startup; auto-creates missing provider adapter files.
+- **No shell dependencies** — works cross-platform without any `.sh` wrappers.
 
 ```text
-frontend/       Next.js UI
+frontend/       Next.js UI (React, Tailwind)
 backend/        Express API + provider adapters
-image-service/  Local image generation service
+  src/
+    providers/  ollama.js, openaiCompatible.js, anthropic.js
+    modelService.js
+    server.js
+image-service/  Local Stable Diffusion image generation
 providers/      Local runtime binaries (llama-server, koboldcpp)
 training/msq/   MSQ model family — Modelfiles and setup script
-run.js          Unified launcher, installer, doctor, logs, and cleanup commands
+config/         default.json — port, model, and path configuration
+run.js          Unified launcher, installer, doctor, logs, and cleanup
 ```
+
+---
 
 ## MSQ Model Family
 
-MSQ is a model family created by Moshiko Nayman, built on top of publicly available base models and tuned specifically for Mirabilis.
+MSQ is a custom model family created by Moshiko Nayman, built on publicly available base models and tuned specifically for Mirabilis workflows.
+
+| Model | Base | Use Case |
+|---|---|---|
+| MSQ Raw-8B | 8B base | Fast local inference, general use |
+| MSQ Pro-12B | 12B base | Balanced quality and speed |
+| MSQ Ultra-31B | 31B base | Maximum local quality |
+
+Install via `training/msq/setup.sh` or pull directly through the Ollama panel in the UI.
 
 | Model             | Base                           | Params | Context | Character                                     |
 |-------------------|--------------------------------|-------:|--------:|-----------------------------------------------|
