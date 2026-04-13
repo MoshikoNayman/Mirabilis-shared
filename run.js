@@ -79,8 +79,8 @@ function printStartupSummary(provider, verbose) {
   const totalMs = Date.now() - LAUNCH_STARTED_AT;
   statusLine('INFO', `Total startup time: ${fmtMs(totalMs)}`);
   statusLine('INFO', `Active provider: ${provider}`);
-  statusLine('INFO', 'Frontend: http://127.0.0.1:3000');
-  statusLine('INFO', 'Backend:  http://127.0.0.1:4000');
+  statusLine('INFO', 'Frontend: http://localhost:3000');
+  statusLine('INFO', 'Backend:  http://localhost:4000');
   statusLine('INFO', 'Image:    http://127.0.0.1:7860');
   statusLine('INFO', `State file: ${RUN_STATE_PATH}`);
   if (verbose) {

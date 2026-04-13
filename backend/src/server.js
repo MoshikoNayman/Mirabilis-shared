@@ -31,7 +31,16 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024, files: 10 }
 });
 
-app.use(cors({ origin: config.frontendOrigin }));
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow same-origin requests (no Origin header) and any localhost/loopback origin.
+    // This handles localhost vs 127.0.0.1 discrepancies and any port Next.js picks.
+    if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      return cb(null, true);
+    }
+    cb(null, false);
+  }
+}));
 app.use(express.json({ limit: '1mb' }));
 
 function nowIso() {
