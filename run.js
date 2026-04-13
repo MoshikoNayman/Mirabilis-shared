@@ -726,21 +726,6 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
   }
 }
 `;
-          const json = JSON.parse(line.slice(6));
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) {
-            onChunk(delta);
-          }
-        } catch {
-          // Ignore JSON parse errors for partial lines
-        }
-      }
-    }
-  } catch (error) {
-    onChunk(\`\\n[OpenAI-compatible error: \${error.message}]\`);
-  }
-}
-`;
     await fsp.writeFile(openaiProviderFile, openaiCode, 'utf8');
     statusLine('OK', 'Created backend provider: openaiCompatible.js');
   }
