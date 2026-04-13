@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S16] — 2026-04-12
+
+### Backend Error Visibility & Installer Hardening
+
+- **run.js backend diagnostics**: When backend fails to become ready, captured and logged the last 20 lines of `backend.log` to terminal instead of generic timeout message. Users now see the actual error (missing dependency, crash, port binding failure, etc.).
+- **install.sh npm error handling**: Added explicit error exit codes if `npm install` fails in backend or frontend directories, instead of silently continuing.
+- **install.sh validation**: Added final validation step to confirm `node_modules` and Python venv are actually present before declaring success. Prevents false-positive "installation complete" when dependencies failed to install.
+- **waitForEndpoint improvement**: Extended function to accept optional process object and log file, enabling crash detection and error output retrieval during startup.
+
+---
+
 ## [26.3R1-S15] — 2026-04-12
 
 ### Installer Prerequisite Guard
@@ -13,6 +24,7 @@ Versioning follows Junos-style tags.
 ---
 
 ## [26.3R1-S14] — 2026-04-12
+
 
 ### Chat Performance Optimization
 

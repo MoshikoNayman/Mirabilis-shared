@@ -15,6 +15,8 @@ const IMAGE_SERVICE_DIR = path.join(ROOT_DIR, 'image-service');
 const PROVIDERS_DIR = path.join(ROOT_DIR, 'providers');
 const MODEL_PATH = path.join(os.tmpdir(), 'mirabilis-llama-3.2-1b-instruct-q4_k_m.gguf');
 const RUN_STATE_PATH = path.join(os.tmpdir(), 'mirabilis-run-state.json');
+const LAUNCH_STARTED_AT = Date.now();
+const phaseTimings = [];
 
 let ollamaStartedByScript = false;
 const managed = {
@@ -26,16 +28,83 @@ const managed = {
   ollama: null
 };
 
+function supportsAnsi() {
+  return Boolean(process.stdout.isTTY && process.env.NO_COLOR !== '1');
+}
+
+function color(text, code) {
+  if (!supportsAnsi()) return text;
+  return `\x1b[${code}m${text}\x1b[0m`;
+}
+
+function fmtMs(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function section(title) {
+  process.stdout.write(`\n${color('==', '2')} ${color(title, '1')}\n`);
+}
+
+function statusLine(level, message) {
+  const map = {
+    OK: color('OK  ', '32'),
+    WARN: color('WARN', '33'),
+    FAIL: color('FAIL', '31'),
+    INFO: color('INFO', '36')
+  };
+  process.stdout.write(`  [${map[level] || level}] ${message}\n`);
+}
+
+async function withPhase(name, task) {
+  const started = Date.now();
+  section(name);
+  try {
+    const result = await task();
+    const ms = Date.now() - started;
+    phaseTimings.push({ name, ms });
+    statusLine('OK', `${name} completed in ${fmtMs(ms)}`);
+    return result;
+  } catch (error) {
+    const ms = Date.now() - started;
+    phaseTimings.push({ name, ms, failed: true });
+    statusLine('FAIL', `${name} failed after ${fmtMs(ms)}`);
+    throw error;
+  }
+}
+
+function printStartupSummary(provider, verbose) {
+  section('Summary');
+  const totalMs = Date.now() - LAUNCH_STARTED_AT;
+  statusLine('INFO', `Total startup time: ${fmtMs(totalMs)}`);
+  statusLine('INFO', `Active provider: ${provider}`);
+  statusLine('INFO', 'Frontend: http://127.0.0.1:3000');
+  statusLine('INFO', 'Backend:  http://127.0.0.1:4000');
+  statusLine('INFO', 'Image:    http://127.0.0.1:7860');
+  statusLine('INFO', `State file: ${RUN_STATE_PATH}`);
+  if (verbose) {
+    statusLine('INFO', `Logs: ${path.join(os.tmpdir(), 'backend.log')}, ${path.join(os.tmpdir(), 'frontend.log')}, ${path.join(os.tmpdir(), 'image-service.log')}`);
+  }
+  if (phaseTimings.length > 0) {
+    for (const p of phaseTimings) {
+      statusLine(p.failed ? 'WARN' : 'INFO', `${p.name}: ${fmtMs(p.ms)}`);
+    }
+  }
+}
+
 function usage() {
-  process.stdout.write(`Usage: ./run.sh [provider|command] [args] [--log]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  install            - Delegate to install.sh (pre-cutover compatibility path)\n  uninstall          - Delegate to uninstall.sh (pre-cutover compatibility path)\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log\n  ./run.sh doctor\n  ./run.sh restart koboldcpp --log\n  ./run.sh install\n  ./run.sh uninstall\n  ./run.sh stop\n\n`);
+  process.stdout.write(`Usage: ./run.sh [provider|command] [args] [--log] [--verbose]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  install            - Delegate to install.sh (pre-cutover compatibility path)\n  uninstall          - Delegate to uninstall.sh (pre-cutover compatibility path)\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log --verbose\n  ./run.sh doctor\n  ./run.sh restart koboldcpp --log\n  ./run.sh install\n  ./run.sh uninstall\n  ./run.sh stop\n\n`);
 }
 
 function parseArgs(argv) {
   let logEnabled = false;
+  let verbose = false;
   const filtered = [];
   for (const arg of argv) {
     if (arg === '--log') {
       logEnabled = true;
+    } else if (arg === '--verbose') {
+      verbose = true;
     } else {
       filtered.push(arg);
     }
@@ -43,7 +112,7 @@ function parseArgs(argv) {
   const mode = filtered[0] || 'ui';
   const arg = filtered[1] || '';
   const extraArgs = filtered.slice(1);
-  return { mode, arg, extraArgs, logEnabled };
+  return { mode, arg, extraArgs, logEnabled, verbose };
 }
 
 function normalizeProvider(raw) {
@@ -159,10 +228,23 @@ async function endpointReady(url) {
   }
 }
 
-async function waitForEndpoint(url, timeoutMs, label) {
+async function waitForEndpoint(url, timeoutMs, label, processObj, logFile) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (await endpointReady(url)) return;
+    // Check if process crashed
+    if (processObj && processObj.exitCode !== null) {
+      let errorMsg = `${label} exited with code ${processObj.exitCode}`;
+      if (logFile && fs.existsSync(logFile)) {
+        try {
+          const logs = fs.readFileSync(logFile, 'utf8').split('\n').slice(-20).join('\n');
+          errorMsg += `\n\nLast output:\n${logs}`;
+        } catch {
+          // Ignore if can't read log
+        }
+      }
+      throw new Error(errorMsg);
+    }
     await sleep(1000);
   }
   throw new Error(`${label} did not become ready at ${url}`);
@@ -445,8 +527,9 @@ function cleanup() {
 }
 
 async function main() {
-  const { mode, arg, extraArgs, logEnabled } = parseArgs(process.argv.slice(2));
+  const { mode, arg, extraArgs, logEnabled, verbose } = parseArgs(process.argv.slice(2));
   process.env.MIRABILIS_LOG = logEnabled ? '1' : '0';
+  process.env.MIRABILIS_VERBOSE = verbose ? '1' : '0';
 
   if (mode === '-h' || mode === '--help') {
     usage();
@@ -483,11 +566,19 @@ async function main() {
   }
 
   if (isRestart) {
-    process.stdout.write(`Restart requested (provider=${provider})\n`);
+    section('Restart');
+    statusLine('INFO', `Requested provider=${provider}`);
     await stopAll();
   }
 
-  ensureDeps();
+  await withPhase('Preflight', async () => {
+    ensureDeps();
+    if (verbose) {
+      statusLine('INFO', `Node: ${process.version}`);
+      statusLine('INFO', `Threads: ${detectThreadCount()}`);
+      statusLine('INFO', `Mode: ${provider}`);
+    }
+  });
 
   process.on('SIGINT', () => {
     cleanup();
@@ -502,88 +593,91 @@ async function main() {
   let aiProvider = 'ollama';
   const env = { ...process.env, PORT: '4000' };
 
-  if (provider === 'ui') {
-    process.stdout.write('Starting Mirabilis (choose provider from UI)\n');
-    if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run ./install.sh.');
-    if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
+  await withPhase('Providers', async () => {
+    if (provider === 'ui') {
+      statusLine('INFO', 'Starting Mirabilis with provider selection in UI');
+      if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run ./install.sh.');
+      if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
 
-    let openaiReady = false;
-    let koboldReady = false;
+      let openaiReady = false;
+      let koboldReady = false;
 
-    try {
+      try {
+        if (await startOpenAICompatible(threads)) {
+          env.OPENAI_BASE_URL = 'http://127.0.0.1:8000/v1';
+          openaiReady = true;
+        }
+      } catch {
+        openaiReady = false;
+      }
+
+      try {
+        if (await startKoboldCpp(threads)) {
+          env.KOBOLD_BASE_URL = 'http://127.0.0.1:5001/v1';
+          koboldReady = true;
+        }
+      } catch {
+        koboldReady = false;
+      }
+
+      statusLine('INFO', `Provider status: ollama=ready openai-compatible=${openaiReady ? 'ready' : 'unavailable'} koboldcpp=${koboldReady ? 'ready' : 'unavailable'}`);
+    } else if (provider === 'ollama') {
+      statusLine('INFO', 'Using Ollama provider');
+      if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run ./install.sh.');
+      if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
+      aiProvider = 'ollama';
+    } else if (provider === 'openai-compatible') {
+      statusLine('INFO', 'Using OpenAI-compatible provider');
       if (await startOpenAICompatible(threads)) {
+        aiProvider = 'openai-compatible';
         env.OPENAI_BASE_URL = 'http://127.0.0.1:8000/v1';
-        openaiReady = true;
+      } else {
+        statusLine('WARN', 'OpenAI-compatible failed; falling back to Ollama');
+        aiProvider = 'ollama';
+        if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run ./install.sh.');
+        await ensureOllamaModel();
       }
-    } catch {
-      openaiReady = false;
-    }
-
-    try {
+    } else if (provider === 'koboldcpp') {
+      statusLine('INFO', 'Using KoboldCpp provider');
       if (await startKoboldCpp(threads)) {
+        aiProvider = 'koboldcpp';
         env.KOBOLD_BASE_URL = 'http://127.0.0.1:5001/v1';
-        koboldReady = true;
+      } else {
+        statusLine('WARN', 'KoboldCpp failed; falling back to Ollama');
+        aiProvider = 'ollama';
+        if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run ./install.sh.');
+        await ensureOllamaModel();
       }
-    } catch {
-      koboldReady = false;
     }
-
-    process.stdout.write(`Provider status: ollama=ready openai-compatible=${openaiReady ? 'ready' : 'unavailable'} koboldcpp=${koboldReady ? 'ready' : 'unavailable'}\n`);
-  } else if (provider === 'ollama') {
-    process.stdout.write('Using Ollama provider\n');
-    if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run ./install.sh.');
-    if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
-    aiProvider = 'ollama';
-  } else if (provider === 'openai-compatible') {
-    process.stdout.write('Using OpenAI-compatible provider\n');
-    if (await startOpenAICompatible(threads)) {
-      aiProvider = 'openai-compatible';
-      env.OPENAI_BASE_URL = 'http://127.0.0.1:8000/v1';
-    } else {
-      process.stdout.write('OpenAI-compatible provider failed; falling back to Ollama\n');
-      aiProvider = 'ollama';
-      if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run ./install.sh.');
-      await ensureOllamaModel();
-    }
-  } else if (provider === 'koboldcpp') {
-    process.stdout.write('Using KoboldCpp provider\n');
-    if (await startKoboldCpp(threads)) {
-      aiProvider = 'koboldcpp';
-      env.KOBOLD_BASE_URL = 'http://127.0.0.1:5001/v1';
-    } else {
-      process.stdout.write('KoboldCpp provider failed; falling back to Ollama\n');
-      aiProvider = 'ollama';
-      if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run ./install.sh.');
-      await ensureOllamaModel();
-    }
-  }
+  });
 
   env.AI_PROVIDER = aiProvider;
 
-  process.stdout.write('\nStarting services...\n');
-  managed.backend = spawnLogged(npmCommand(), ['run', 'dev'], BACKEND_DIR, env, path.join(os.tmpdir(), 'backend.log'), logEnabled);
-  await waitForEndpoint('http://127.0.0.1:4000/health', 45000, 'Backend');
-  process.stdout.write('  Backend: http://127.0.0.1:4000\n');
-  await writeRunState({ provider: aiProvider, logging: logEnabled });
+  await withPhase('Services', async () => {
+    const backendLogFile = path.join(os.tmpdir(), 'backend.log');
+    managed.backend = spawnLogged(npmCommand(), ['run', 'dev'], BACKEND_DIR, env, backendLogFile, logEnabled);
+    await waitForEndpoint('http://127.0.0.1:4000/health', 45000, 'Backend', managed.backend, backendLogFile);
+    statusLine('OK', 'Backend: http://127.0.0.1:4000');
+    await writeRunState({ provider: aiProvider, logging: logEnabled });
 
-  managed.frontend = spawnLogged(npmCommand(), ['run', 'dev'], FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
-  await waitForEndpoint('http://127.0.0.1:3000', 60000, 'Frontend');
-  process.stdout.write('  Frontend: http://127.0.0.1:3000\n');
-  await writeRunState({ provider: aiProvider, logging: logEnabled });
+    managed.frontend = spawnLogged(npmCommand(), ['run', 'dev'], FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
+    await waitForEndpoint('http://127.0.0.1:3000', 60000, 'Frontend');
+    statusLine('OK', 'Frontend: http://127.0.0.1:3000');
+    await writeRunState({ provider: aiProvider, logging: logEnabled });
 
-  const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860' };
-  managed.image = spawnLogged(imagePythonPath(), ['server.py'], IMAGE_SERVICE_DIR, imageEnv, path.join(os.tmpdir(), 'image-service.log'), false);
-  await waitForEndpoint('http://127.0.0.1:7860/health', 240000, 'Image service');
-  process.stdout.write('  Image Service: http://127.0.0.1:7860\n');
-  await writeRunState({ provider: aiProvider, logging: logEnabled });
+    const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860' };
+    managed.image = spawnLogged(imagePythonPath(), ['server.py'], IMAGE_SERVICE_DIR, imageEnv, path.join(os.tmpdir(), 'image-service.log'), false);
+    await waitForEndpoint('http://127.0.0.1:7860/health', 240000, 'Image service');
+    statusLine('OK', 'Image service: http://127.0.0.1:7860');
+    await writeRunState({ provider: aiProvider, logging: logEnabled });
+  });
 
-  process.stdout.write('\nMirabilis is running\n');
-  process.stdout.write('Open: http://localhost:3000\n');
-  process.stdout.write(`Provider: ${aiProvider}\n`);
+  printStartupSummary(aiProvider, verbose);
   if (provider === 'ui') {
-    process.stdout.write('Select any provider from the UI settings\n');
+    statusLine('INFO', 'Select provider from the UI settings panel.');
   }
-  process.stdout.write('Press Ctrl+C to stop\n\n');
+  statusLine('INFO', 'Press Ctrl+C to stop.');
+  process.stdout.write('\n');
 
   await new Promise((resolve) => {
     let exited = 0;
@@ -598,7 +692,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error.message || 'Launcher failed'}\n`);
+  statusLine('FAIL', error.message || 'Launcher failed');
+  statusLine('INFO', 'Try: ./run.sh doctor');
   cleanup();
   process.exit(1);
 });

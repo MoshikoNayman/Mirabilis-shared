@@ -34,13 +34,19 @@ echo "✅ Ollama: $(ollama --version 2>/dev/null || echo installed)"
 echo ""
 echo "📦 Installing backend dependencies..."
 cd "$BACKEND_DIR"
-npm install --legacy-peer-deps
+if ! npm install --legacy-peer-deps; then
+  echo "❌ Backend npm install failed"
+  exit 1
+fi
 
 # Install frontend
 echo ""
 echo "📦 Installing frontend dependencies..."
 cd "$FRONTEND_DIR"
-npm install --legacy-peer-deps
+if ! npm install --legacy-peer-deps; then
+  echo "❌ Frontend npm install failed"
+  exit 1
+fi
 
 # Setup Python environment for image service
 echo ""
@@ -142,6 +148,32 @@ if [[ "$OS" == "Darwin" ]]; then
   install_koboldcpp
 else
   echo "⚠️  Non-macOS detected. Provider runtime auto-install skipped."
+fi
+
+# Final validation
+echo ""
+echo "🔍 Validating installation..."
+errors=0
+
+if [[ ! -d "$BACKEND_DIR/node_modules" ]]; then
+  echo "❌ Backend node_modules missing"
+  errors=$((errors + 1))
+fi
+
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+  echo "❌ Frontend node_modules missing"
+  errors=$((errors + 1))
+fi
+
+venv_python="$IMAGE_SERVICE_DIR/.venv/bin/python"
+if [[ ! -x "$venv_python" ]]; then
+  echo "❌ Python venv not set up"
+  errors=$((errors + 1))
+fi
+
+if [[ $errors -gt 0 ]]; then
+  echo "❌ Installation failed validation"
+  exit 1
 fi
 
 echo ""
