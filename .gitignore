@@ -26,7 +26,12 @@ npm-debug.log*
 .AppleDouble
 ._*
 .mirabilis/
-providers/
+# providers/ binaries (but keep .js adapters)
+providers/*
+!providers/
+backend/src/providers/
+!backend/src/providers/
+!backend/src/providers/*.js
 models/
 .vscode/
 .idea/
