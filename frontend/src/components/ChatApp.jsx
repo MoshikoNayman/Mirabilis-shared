@@ -3951,6 +3951,12 @@ export default function ChatApp() {
                             setProvider(opt.id);
                             setIsProviderMenuOpen(false);
                             setStatusText(`Provider: ${opt.label} (${opt.scope})`);
+                            // If the active model is a local GGUF file and we're switching to a
+                            // cloud-only provider, reset to 'auto' so it doesn't get sent to the API.
+                            const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'claude', 'gpuaas'];
+                            if (cloudOnlyProviders.includes(opt.id)) {
+                              setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
+                            }
                             if (opt.id !== 'ollama' && !String(providerConfigs[opt.id]?.baseUrl || '').trim()) {
                               setIsProviderConfigOpen(true);
                             }
@@ -4047,13 +4053,25 @@ export default function ChatApp() {
                     {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && (
                       <>
                         <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
-                        <input
-                          type="password"
-                          className="mb-2 w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
-                          placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
-                          value={providerConfigs[provider]?.apiKey || ''}
-                          onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: e.target.value } }))}
-                        />
+                        <div className="mb-2 flex gap-1">
+                          <input
+                            type="password"
+                            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
+                            placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
+                            value={providerConfigs[provider]?.apiKey || ''}
+                            onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: e.target.value } }))}
+                          />
+                          {providerConfigs[provider]?.apiKey ? (
+                            <button
+                              type="button"
+                              title="Clear API key"
+                              onClick={() => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: '' } }))}
+                              className="flex-shrink-0 rounded-lg border border-black/10 px-2 py-1 text-xs text-slate-500 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10 dark:text-slate-400 dark:hover:border-red-500/40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                            >
+                              Clear
+                            </button>
+                          ) : null}
+                        </div>
                       </>
                     )}
                     {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && (
