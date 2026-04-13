@@ -428,6 +428,27 @@ function runForeground(command, args, cwd) {
   });
 }
 
+async function installOllama() {
+  statusLine('INFO', 'Ollama not found — attempting auto-install...');
+  if (process.platform === 'darwin') {
+    if (await commandExists('brew')) {
+      statusLine('INFO', 'Installing Ollama via Homebrew (this may take a minute)...');
+      const code = await runForeground('brew', ['install', 'ollama'], ROOT_DIR);
+      if (code !== 0) throw new Error('Ollama auto-install via Homebrew failed.\nInstall manually: brew install ollama');
+      statusLine('OK', 'Ollama installed via Homebrew');
+    } else {
+      throw new Error('Ollama not installed and Homebrew not found.\n  Install Homebrew: https://brew.sh\n  Then install Ollama: brew install ollama');
+    }
+  } else if (process.platform === 'linux') {
+    statusLine('INFO', 'Installing Ollama via official install script...');
+    const code = await runForeground('sh', ['-c', 'curl -fsSL https://ollama.com/install.sh | sh'], ROOT_DIR);
+    if (code !== 0) throw new Error('Ollama auto-install failed.\nInstall manually: https://ollama.com/download');
+    statusLine('OK', 'Ollama installed');
+  } else {
+    throw new Error('Ollama not installed.\nDownload and install from: https://ollama.com/download\nThen rerun: node run.js');
+  }
+}
+
 async function runInstall() {
   statusLine('INFO', 'Installing Mirabilis dependencies...');
 
@@ -437,9 +458,9 @@ async function runInstall() {
   }
   statusLine('OK', `Node.js: ${require('child_process').execSync('node -v', { encoding: 'utf8' }).trim()}`);
 
-  // Check Ollama
+  // Check Ollama — auto-install if missing
   if (!(await commandExists('ollama'))) {
-    throw new Error(`Ollama is required but not installed.\n${process.platform === 'darwin' ? '  Install with: brew install ollama' : '  Install from: https://ollama.com/download'}\nThen start Ollama and rerun: node run.js install`);
+    await installOllama();
   }
   statusLine('OK', 'Ollama: installed');
 
