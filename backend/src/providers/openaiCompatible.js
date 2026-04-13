@@ -2,10 +2,14 @@
 
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'http://127.0.0.1:8000/v1';
 
-export async function listOpenAICompatibleModels(baseUrl) {
-  const base = baseUrl || OPENAI_BASE_URL;
+export async function listOpenAICompatibleModels(input) {
+  const base = typeof input === 'string'
+    ? (input || OPENAI_BASE_URL)
+    : (input?.baseUrl || OPENAI_BASE_URL);
+  const apiKey = typeof input === 'object' && input !== null ? input.apiKey : '';
   try {
-    const res = await fetch(`${base}/models`);
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined;
+    const res = await fetch(`${base}/models`, { headers });
     if (!res.ok) return [];
     const data = await res.json();
     return (data.data || []).map(m => ({
@@ -19,7 +23,7 @@ export async function listOpenAICompatibleModels(baseUrl) {
   }
 }
 
-export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens }) {
+export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens, providerLabel = 'OpenAI-compatible' }) {
   const base = baseUrl || OPENAI_BASE_URL;
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -44,7 +48,21 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
     });
 
     if (!res.ok) {
-      throw new Error(`OpenAI-compatible API error: ${res.status}`);
+      const bodyText = await res.text().catch(() => '');
+      let detail = '';
+      try {
+        const parsed = JSON.parse(bodyText || '{}');
+        detail =
+          parsed?.error?.message ||
+          parsed?.message ||
+          (Array.isArray(parsed) ? (parsed[0]?.error?.message || parsed[0]?.message || '') : '');
+      } catch {
+        detail = bodyText || '';
+      }
+      if (res.status === 429 && !detail) {
+        detail = 'Rate limit or quota exceeded for this API key.';
+      }
+      throw new Error(`${providerLabel} API error: ${res.status}${detail ? ` - ${detail}` : ''}`);
     }
 
     const reader = res.body.getReader();
@@ -75,6 +93,6 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
       }
     }
   } catch (error) {
-    if (error.name !== 'AbortError') onToken(`\n[OpenAI-compatible error: ${error.message}]`);
+    if (error.name !== 'AbortError') onToken(`\n[${providerLabel} error: ${error.message}]`);
   }
 }

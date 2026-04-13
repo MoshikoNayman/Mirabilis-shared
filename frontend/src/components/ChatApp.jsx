@@ -6,12 +6,52 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-const DEFAULT_SYSTEM_PROMPT = 'You are Mirabilis AI, a concise and helpful local assistant. You run entirely on the user\'s own device — never describe yourself as cloud-based or as a generic AI product. When someone asks who created or built you, answer naturally and briefly: Mirabilis AI was created by Moshiko Nayman. Do not volunteer that information unprompted. Image generation is available locally via a Stable Diffusion service — generate real images rather than ASCII art when asked.';
+function buildDefaultSystemPrompt(providerId) {
+  const runtimeLine = providerId === 'ollama' || providerId === 'koboldcpp'
+    ? 'You are running entirely on the user\'s own device.'
+    : 'You are inside a local app and may answer using either local or user-configured remote AI providers.';
+
+  return `You are Mirabilis AI, a concise and helpful assistant. ${runtimeLine} Never describe yourself as a generic AI product. When someone asks who created or built you, answer naturally and briefly: Mirabilis AI was created by Moshiko Nayman. Do not volunteer that information unprompted. Image generation is available locally via a Stable Diffusion service — generate real images rather than ASCII art when asked.`;
+}
+
+const DEFAULT_SYSTEM_PROMPT = buildDefaultSystemPrompt('ollama');
+
+function isMirabilisDefaultPrompt(value) {
+  const text = String(value || '');
+  return text.includes('You are Mirabilis AI, a concise and helpful assistant.') ||
+    text.includes('You are Mirabilis AI, a concise and helpful local assistant.') ||
+    text === 'You are a concise and helpful local assistant.';
+}
+
+function formatUsdEstimate(value) {
+  const amount = Number(value || 0);
+  if (amount <= 0) return '$0.00';
+  if (amount < 0.001) return '<$0.001';
+  if (amount < 0.01) return `$${amount.toFixed(3)}`;
+  return `$${amount.toFixed(2)}`;
+}
+
+function formatUsagePercent(estUsd, budgetUsd) {
+  const budget = Number(budgetUsd || 0);
+  const value = Number(estUsd || 0);
+  if (!(budget > 0) || !(value > 0)) return '0%';
+  const pct = (value / budget) * 100;
+  if (pct > 0 && pct < 1) return '<1%';
+  return `${Math.min(100, Math.round(pct))}%`;
+}
 const PROVIDER_OPTIONS = [
-  { id: 'ollama', label: 'Ollama' },
-  { id: 'openai-compatible', label: 'OpenAI-compatible' },
-  { id: 'koboldcpp', label: 'KoboldCpp' }
+  { id: 'ollama', label: 'Ollama', scope: 'Local' },
+  { id: 'openai', label: 'OpenAI', scope: 'Remote' },
+  { id: 'grok', label: 'Grok', scope: 'Remote' },
+  { id: 'groq', label: 'Groq', scope: 'Remote' },
+  { id: 'openrouter', label: 'OpenRouter', scope: 'Remote' },
+  { id: 'gemini', label: 'Gemini', scope: 'Remote' },
+  { id: 'claude', label: 'Claude', scope: 'Remote' },
+  { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote' },
+  { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote' },
+  { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local' }
 ];
+const STREAM_STALL_TIMEOUT_MS = 120000;
 
 const UNCENSORED_MODEL_PRIORITY = [
   'qwen3.5-uncensored',
@@ -38,16 +78,75 @@ function isUncensoredModelRecord(item) {
 // Models with guaranteed 128K+ context window — preferred when conversation is large.
 // (phi4=16K, mistral/mixtral=32K are excluded intentionally)
 const LARGE_CONTEXT_PRIORITY = [
-  'llama3.3', 'llama3.1', 'qwen3', 'deepseek-r1', 'gemma4:31b', 'gemma4:26b',
-  'gemma3:27b', 'gemma3:12b', 'gemma4:e4b', 'gemma4:e2b', 'gemma3', 'qwen2.5', 'llama3'
+  'qwen2.5', 'llama3.1', 'gemma3', 'qwen3', 'deepseek-r1', 'gemma4:e2b', 'gemma4:e4b',
+  'gemma3:12b', 'gemma3:27b', 'gemma4:26b', 'gemma4:31b', 'llama3.3', 'llama3'
 ];
 
-// Priority list for Auto mode when context is small — most capable installed model first.
+// Priority list for Auto mode when context is small — prefer faster/lighter local models first.
 const AUTO_MODEL_PRIORITY = [
-  'llama3.3', 'qwen3', 'deepseek-r1', 'mistral-large', 'gemma4:31b', 'gemma4:26b',
-  'gemma3:27b', 'gemma3:12b', 'llama3.1', 'gemma4:e4b', 'gemma4:e2b',
-  'mistral', 'gemma3', 'qwen2.5', 'phi4', 'llama3'
+  'qwen2.5', 'llama3.1', 'gemma3', 'mistral', 'phi4', 'qwen3',
+  'deepseek-r1', 'gemma4:e2b', 'gemma4:e4b', 'gemma3:12b', 'gemma3:27b',
+  'gemma4:26b', 'gemma4:31b', 'mistral-large', 'llama3.3', 'llama3'
 ];
+
+const COST_RATES_PER_1M = {
+  openai: {
+    default: { in: 0.15, out: 0.60 },
+    'gpt-4o': { in: 5.0, out: 15.0 },
+    'gpt-4.1': { in: 5.0, out: 15.0 },
+    'gpt-4o-mini': { in: 0.15, out: 0.60 }
+  },
+  grok: {
+    default: { in: 0.50, out: 1.50 },
+    'grok-3': { in: 5.0, out: 15.0 },
+    'grok-3-mini': { in: 0.50, out: 1.50 }
+  },
+  groq: {
+    default: { in: 0.05, out: 0.08 },
+    'llama-3.1-8b': { in: 0.05, out: 0.08 },
+    'llama-3.3-70b': { in: 0.59, out: 0.79 }
+  },
+  openrouter: {
+    default: { in: 0.50, out: 1.50 },
+    'openai/gpt-4o-mini': { in: 0.15, out: 0.60 },
+    'anthropic/claude-3.5-sonnet': { in: 3.00, out: 15.00 }
+  },
+  gpuaas: {
+    default: { in: 0.60, out: 1.80 }
+  },
+  gemini: {
+    default: { in: 0.10, out: 0.40 },
+    'gemini-2.5-pro': { in: 3.50, out: 10.50 },
+    'gemini-2.5-flash': { in: 0.10, out: 0.40 }
+  },
+  claude: {
+    default: { in: 3.00, out: 15.00 },
+    'claude-3-5-haiku': { in: 0.80, out: 4.00 },
+    'claude-3-5-sonnet': { in: 3.00, out: 15.00 },
+    'claude-sonnet': { in: 3.00, out: 15.00 },
+    'claude-opus': { in: 15.00, out: 75.00 }
+  }
+};
+
+function resolveRateCard(providerId, modelId) {
+  const providerRates = COST_RATES_PER_1M[providerId];
+  if (!providerRates) return null;
+  const key = String(modelId || '').toLowerCase();
+  for (const [prefix, rate] of Object.entries(providerRates)) {
+    if (prefix === 'default') continue;
+    if (key.startsWith(prefix)) return rate;
+  }
+  return providerRates.default;
+}
+
+function normalizeGeminiBaseUrl(baseUrl) {
+  const raw = String(baseUrl || '').trim().replace(/\/$/, '');
+  if (!raw) return 'https://generativelanguage.googleapis.com/v1beta/openai';
+  if (raw.includes('generativelanguage.googleapis.com') && !raw.endsWith('/openai')) {
+    return `${raw}/openai`;
+  }
+  return raw;
+}
 
 // Threshold above which we switch to context-first routing (in tokens ~= 6K chars).
 const LARGE_CONTEXT_THRESHOLD = 6000;
@@ -840,6 +939,13 @@ export default function ChatApp() {
       if (stored) try { return JSON.parse(stored); } catch {}
     }
     return {
+      openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '' },
+      grok: { baseUrl: 'https://api.x.ai/v1', apiKey: '' },
+      groq: { baseUrl: 'https://api.groq.com/openai/v1', apiKey: '' },
+      openrouter: { baseUrl: 'https://openrouter.ai/api/v1', apiKey: '' },
+      gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: '' },
+      claude: { baseUrl: 'https://api.anthropic.com', apiKey: '' },
+      gpuaas: { baseUrl: '', apiKey: '' },
       'openai-compatible': { baseUrl: 'http://127.0.0.1:8000/v1', apiKey: '' },
       'koboldcpp': { baseUrl: 'http://127.0.0.1:5001/v1', apiKey: '' }
     };
@@ -849,7 +955,7 @@ export default function ChatApp() {
     if (typeof window !== 'undefined') return window.localStorage.getItem('local-ai-model') || 'auto';
     return 'auto';
   });
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+  const [systemPrompt, setSystemPrompt] = useState(buildDefaultSystemPrompt(provider));
   const [statusText, setStatusText] = useState('Ready');
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [imageServiceAvailable, setImageServiceAvailable] = useState(false);
@@ -982,6 +1088,13 @@ export default function ChatApp() {
     }
     return null;
   });
+  const [remoteBudgetUsd, setRemoteBudgetUsd] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const v = Number(window.localStorage.getItem('mirabilis-remote-budget-usd') || '20');
+      return Number.isFinite(v) && v > 0 ? v : 20;
+    }
+    return 20;
+  });
   const [mcpServers, setMcpServers] = useState([]);
   const [mcpSelectedServerId, setMcpSelectedServerId] = useState('');
   const [mcpForm, setMcpForm] = useState({
@@ -1011,7 +1124,7 @@ export default function ChatApp() {
 
   const selectedModelRecord = useMemo(() => models.find((item) => item.id === model) || null, [model, models]);
   const shouldShowModelChip = useMemo(
-    () => provider === 'ollama' || provider === 'openai-compatible' || provider === 'koboldcpp' || models.length > 0,
+    () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'koboldcpp' || models.length > 0,
     [provider, models.length]
   );
 
@@ -1054,15 +1167,16 @@ export default function ChatApp() {
     if (savedPersonalMemory === 'false') {
       setUsePersonalMemory(false);
     }
-    if (
-      savedPrompt === 'You are a concise and helpful local assistant.' ||
-      (savedPrompt != null && savedPrompt.startsWith('You are Mirabilis AI, a concise and helpful assistant running locally in this app'))
-    ) {
-      setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
+    if (isMirabilisDefaultPrompt(savedPrompt)) {
+      setSystemPrompt(buildDefaultSystemPrompt(provider));
     } else if (savedPrompt) {
       setSystemPrompt(savedPrompt);
     }
   }, []);
+
+  useEffect(() => {
+    setSystemPrompt((current) => (isMirabilisDefaultPrompt(current) ? buildDefaultSystemPrompt(provider) : current));
+  }, [provider]);
 
   useEffect(() => {
     const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
@@ -1112,16 +1226,20 @@ export default function ChatApp() {
     (async () => {
       try {
         const cfgBase = String(providerConfigs?.[provider]?.baseUrl || '').trim();
+        const cfgKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
+        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && !cfgKey) {
+          const p = provider === 'grok' ? 'Grok' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Gemini' : provider === 'claude' ? 'Claude' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
+          setStatusText(`${p} selected. Add API key in Configure endpoint.`);
+          return;
+        }
         const query = new URLSearchParams({ provider });
         if (cfgBase) query.set('baseUrl', cfgBase);
+        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && cfgKey) query.set('apiKey', cfgKey);
         const health = await api(`/api/providers/health?${query.toString()}`);
         if (cancelled) return;
         if (!health?.reachable) {
-          const ollama = await api('/api/providers/health?provider=ollama');
-          if (!cancelled && ollama?.reachable) {
-            setProvider('ollama');
-            setStatusText('Selected provider is down. Automatically switched to Ollama.');
-          }
+          const hint = health?.hint ? ` ${health.hint}` : '';
+          setStatusText(`Selected provider unavailable.${hint}`.trim());
         }
       } catch {
         // ignore startup health probe failures
@@ -1142,6 +1260,34 @@ export default function ChatApp() {
         : (existingOpenAiBase || 'http://127.0.0.1:8000/v1');
       const next = {
         ...prev,
+        openai: {
+          baseUrl: prev?.openai?.baseUrl || 'https://api.openai.com/v1',
+          apiKey: prev?.openai?.apiKey || ''
+        },
+        grok: {
+          baseUrl: prev?.grok?.baseUrl || 'https://api.x.ai/v1',
+          apiKey: prev?.grok?.apiKey || ''
+        },
+        groq: {
+          baseUrl: prev?.groq?.baseUrl || 'https://api.groq.com/openai/v1',
+          apiKey: prev?.groq?.apiKey || ''
+        },
+        openrouter: {
+          baseUrl: prev?.openrouter?.baseUrl || 'https://openrouter.ai/api/v1',
+          apiKey: prev?.openrouter?.apiKey || ''
+        },
+        gemini: {
+          baseUrl: normalizeGeminiBaseUrl(prev?.gemini?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'),
+          apiKey: prev?.gemini?.apiKey || ''
+        },
+        claude: {
+          baseUrl: prev?.claude?.baseUrl || 'https://api.anthropic.com',
+          apiKey: prev?.claude?.apiKey || ''
+        },
+        gpuaas: {
+          baseUrl: prev?.gpuaas?.baseUrl || '',
+          apiKey: prev?.gpuaas?.apiKey || ''
+        },
         'openai-compatible': {
           baseUrl: normalizedOpenAiBase,
           apiKey: prev?.['openai-compatible']?.apiKey || ''
@@ -1193,6 +1339,12 @@ export default function ChatApp() {
     if (maxTokens === null) window.localStorage.removeItem('mirabilis-max-tokens');
     else window.localStorage.setItem('mirabilis-max-tokens', String(maxTokens));
   }, [maxTokens]);
+
+  useEffect(() => {
+    if (Number.isFinite(remoteBudgetUsd) && remoteBudgetUsd > 0) {
+      window.localStorage.setItem('mirabilis-remote-budget-usd', String(remoteBudgetUsd));
+    }
+  }, [remoteBudgetUsd]);
 
   async function fetchPiperModels() {
     try {
@@ -2001,7 +2153,7 @@ export default function ChatApp() {
 
     setUsePersonalMemory(true);
     if (!systemPrompt.trim()) {
-      setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
+      setSystemPrompt(buildDefaultSystemPrompt(provider));
     }
 
     if (!activeChatId) {
@@ -2193,10 +2345,12 @@ export default function ChatApp() {
     try {
       const query = new URLSearchParams({ provider: String(provider || '').trim() });
       if (provider !== 'ollama') {
-        const baseUrl = String(providerConfigs?.[provider]?.baseUrl || '').trim();
+        const baseUrl = provider === 'gemini'
+          ? normalizeGeminiBaseUrl(providerConfigs?.[provider]?.baseUrl || '')
+          : String(providerConfigs?.[provider]?.baseUrl || '').trim();
         const apiKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
         if (baseUrl) query.set('baseUrl', baseUrl);
-        if (provider === 'openai-compatible' && apiKey) query.set('apiKey', apiKey);
+        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && apiKey) query.set('apiKey', apiKey);
       }
       const payload = await api(`/api/models?${query.toString()}`);
       const available = payload.models || [];
@@ -2227,29 +2381,27 @@ export default function ChatApp() {
       return { provider: 'ollama', model: effectiveModel, providerBaseUrl: undefined, providerApiKey: undefined };
     }
 
-    async function fallbackToOllama(reason) {
-      try {
-        const ollamaHealth = await api('/api/providers/health?provider=ollama');
-        if (ollamaHealth?.reachable) {
-          setProvider('ollama');
-          setStatusText(`Selected provider unavailable. Switched to Ollama. ${reason || ''}`.trim());
-          const forcedUncensored = uncensoredMode ? pickMostUncensoredModel(models) : null;
-          const effectiveModel = forcedUncensored?.id || model;
-          if (uncensoredMode && forcedUncensored?.id && model !== forcedUncensored.id) {
-            setModel(forcedUncensored.id);
-          }
-          return { provider: 'ollama', model: effectiveModel, providerBaseUrl: undefined, providerApiKey: undefined };
-        }
-      } catch {
-        // ignore fallback probe errors
-      }
-      return null;
+    const firstAvailableModel = (models || []).find((item) => item?.available !== false)?.id || '';
+    const effectiveNonOllamaModel = model === 'auto'
+      ? (firstAvailableModel || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'grok' ? 'grok-3-mini' : provider === 'groq' ? 'llama-3.1-8b-instant' : provider === 'openrouter' ? 'openai/gpt-4o-mini' : provider === 'gemini' ? 'gemini-2.0-flash' : provider === 'claude' ? 'claude-3-5-sonnet-latest' : provider === 'gpuaas' ? 'model.gguf' : ''))
+      : model;
+
+    const configuredApiKey = String(providerConfigs[provider]?.apiKey || '').trim();
+    if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && !configuredApiKey) {
+      setIsProviderConfigOpen(true);
+      const p = provider === 'grok' ? 'xAI' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Google AI' : provider === 'claude' ? 'Anthropic' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
+      throw new Error(`${p} API key is required. Open Configure endpoint and paste your key.`);
     }
 
-    const configuredBaseUrl = String(providerConfigs[provider]?.baseUrl || '').trim();
+    const configuredBaseUrl = provider === 'gemini'
+      ? normalizeGeminiBaseUrl(providerConfigs[provider]?.baseUrl || '')
+      : String(providerConfigs[provider]?.baseUrl || '').trim();
     const query = new URLSearchParams({ provider });
     if (configuredBaseUrl) {
       query.set('baseUrl', configuredBaseUrl);
+    }
+    if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && configuredApiKey) {
+      query.set('apiKey', configuredApiKey);
     }
 
     try {
@@ -2257,7 +2409,7 @@ export default function ChatApp() {
       if (payload?.reachable) {
         return {
           provider,
-          model,
+          model: effectiveNonOllamaModel,
           providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
           providerApiKey: providerConfigs[provider]?.apiKey || undefined
         };
@@ -2265,22 +2417,18 @@ export default function ChatApp() {
 
       const hint = payload?.hint ? ` ${payload.hint}` : '';
       const target = payload?.baseUrl || configuredBaseUrl || 'configured endpoint';
-      const fallback = await fallbackToOllama(`Provider check failed for ${target}.${hint}`);
-      if (fallback) return fallback;
       setStatusText(`Provider check warning: ${target} is unreachable.${hint}`);
       return {
         provider,
-        model,
+        model: effectiveNonOllamaModel,
         providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
         providerApiKey: providerConfigs[provider]?.apiKey || undefined
       };
     } catch (error) {
-      const fallback = await fallbackToOllama(`Provider check error: ${error.message}`);
-      if (fallback) return fallback;
       setStatusText(`Provider check failed: ${error.message}`);
       return {
         provider,
-        model,
+        model: effectiveNonOllamaModel,
         providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
         providerApiKey: providerConfigs[provider]?.apiKey || undefined
       };
@@ -2710,6 +2858,25 @@ export default function ChatApp() {
     };
   }, [messages, model, systemPromptTokens]);
 
+  const remoteUsage = useMemo(() => {
+    const remoteProvider = provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' ? provider : null;
+    if (!remoteProvider) {
+      return { enabled: false, estUsd: 0, pct: 0, budgetUsd: remoteBudgetUsd, rate: null };
+    }
+
+    const rate = resolveRateCard(remoteProvider, model);
+    if (!rate) {
+      return { enabled: false, estUsd: 0, pct: 0, budgetUsd: remoteBudgetUsd, rate: null };
+    }
+
+    const input = Number(chatTokenSummary.input || 0);
+    const output = Number(chatTokenSummary.output || 0);
+    const estUsd = (input / 1_000_000) * rate.in + (output / 1_000_000) * rate.out;
+    const budget = Number(remoteBudgetUsd || 0);
+    const pct = budget > 0 ? Math.min(100, Math.round((estUsd / budget) * 100)) : 0;
+    return { enabled: true, estUsd, pct, budgetUsd: budget, rate };
+  }, [provider, model, chatTokenSummary.input, chatTokenSummary.output, remoteBudgetUsd]);
+
   async function handleImageGeneration(content) {
     setInput('');
     setIsStreaming(true);
@@ -2970,12 +3137,22 @@ export default function ChatApp() {
 
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
     setIsStreaming(true);
+    let stalledByWatchdog = false;
+    let stallTimer = null;
 
     try {
       const ctrl = new AbortController();
       streamAbortRef.current = ctrl;
+      const refreshStallWatchdog = () => {
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          stalledByWatchdog = true;
+          try { ctrl.abort(); } catch { /* no-op */ }
+        }, STREAM_STALL_TIMEOUT_MS);
+      };
       const outboundSystemPrompt = uncensoredMode ? '' : systemPrompt;
       const outboundUsePersonalMemory = uncensoredMode ? false : usePersonalMemory;
+      refreshStallWatchdog();
       const response = await fetch(`${API_BASE}/api/chats/${chatId}/messages/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3003,9 +3180,11 @@ export default function ChatApp() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf8');
       let buffer = '';
+      refreshStallWatchdog();
 
       while (true) {
         const { done, value } = await reader.read();
+        refreshStallWatchdog();
         if (done) {
           break;
         }
@@ -3045,6 +3224,7 @@ export default function ChatApp() {
           const payload = JSON.parse(dataText);
 
           if (event === 'token') {
+            refreshStallWatchdog();
             setMessages((prev) => {
               const next = [...prev];
               if (next.length === 0) {
@@ -3100,9 +3280,25 @@ export default function ChatApp() {
       if (trainingMode === 'fine-tuning') {
         await refreshTrainingStats();
       }
+      if (stallTimer) clearTimeout(stallTimer);
       setStatusText('Ready');
     } catch (error) {
+      if (stallTimer) clearTimeout(stallTimer);
       if (error?.name === 'AbortError') {
+        if (stalledByWatchdog) {
+          setStatusText('Stream timed out. Try a smaller model or shorter prompt.');
+          setMessages((prev) => {
+            const next = [...prev];
+            if (next.length > 0 && next[next.length - 1].role === 'assistant' && !next[next.length - 1].content) {
+              next[next.length - 1] = {
+                ...next[next.length - 1],
+                content: 'Error: Stream timed out after 120s without output. Try a smaller local model or reduce prompt/context size.'
+              };
+            }
+            return next;
+          });
+          return;
+        }
         setStatusText('Stopped');
         setMessages((prev) => {
           const next = [...prev];
@@ -3351,6 +3547,21 @@ export default function ChatApp() {
                 input {formatTokenCount(chatTokenSummary.input)} · output {formatTokenCount(chatTokenSummary.output)}
               </p>
             </div>
+
+            {remoteUsage.enabled && (
+              <div className="mt-1.5 rounded-lg border border-black/10 bg-white/75 px-2 py-1.5 dark:border-white/10 dark:bg-slate-900/60">
+                <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                  <span>{provider} est. {formatUsdEstimate(remoteUsage.estUsd)} / ${remoteUsage.budgetUsd.toFixed(2)}</span>
+                  <span>{formatUsagePercent(remoteUsage.estUsd, remoteUsage.budgetUsd)}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${remoteUsage.pct >= 90 ? 'bg-red-500' : remoteUsage.pct >= 70 ? 'bg-amber-500' : 'bg-accent'}`}
+                    style={{ width: `${Math.max(2, remoteUsage.pct)}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="mt-1.5 flex flex-nowrap items-center gap-1.5">
 
@@ -3739,7 +3950,7 @@ export default function ChatApp() {
                           onClick={() => {
                             setProvider(opt.id);
                             setIsProviderMenuOpen(false);
-                            setStatusText(`Provider: ${opt.label}`);
+                            setStatusText(`Provider: ${opt.label} (${opt.scope})`);
                             if (opt.id !== 'ollama' && !String(providerConfigs[opt.id]?.baseUrl || '').trim()) {
                               setIsProviderConfigOpen(true);
                             }
@@ -3750,7 +3961,10 @@ export default function ChatApp() {
                               : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
                           }`}
                         >
-                          <span>{opt.label}</span>
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate">{opt.label}</span>
+                            <span className="text-[10px] opacity-60">{opt.scope}</span>
+                          </span>
                           {provider === opt.id ? <span className="text-[10px] opacity-70">active</span> : null}
                         </button>
                       ))}
@@ -3787,23 +4001,74 @@ export default function ChatApp() {
                         ℹ Point to any OpenAI-compatible local server (LM Studio, llama.cpp, Oobabooga, etc.) or a cloud API that requires a key.
                       </p>
                     )}
+                    {provider === 'gpuaas' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ Use your GPUaaS OpenAI-compatible endpoint URL and key (for example Together, Fireworks, RunPod OpenAI proxy, vLLM gateway).
+                      </p>
+                    )}
+                    {provider === 'openai' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ OpenAI uses https://api.openai.com/v1 and requires an API key.
+                      </p>
+                    )}
+                    {provider === 'grok' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ Grok uses xAI API at https://api.x.ai/v1 and requires an API key.
+                      </p>
+                    )}
+                    {provider === 'groq' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ Groq uses https://api.groq.com/openai/v1 and requires an API key.
+                      </p>
+                    )}
+                    {provider === 'openrouter' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ OpenRouter uses https://openrouter.ai/api/v1 and requires an API key.
+                      </p>
+                    )}
+                    {provider === 'gemini' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ Gemini uses Google AI OpenAI endpoint at https://generativelanguage.googleapis.com/v1beta/openai and requires an API key.
+                      </p>
+                    )}
+                    {provider === 'claude' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ Claude uses Anthropic API at https://api.anthropic.com and requires an API key.
+                      </p>
+                    )}
                     <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">Base URL</label>
                     <input
                       type="text"
                       className="mb-2 w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
-                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : 'http://127.0.0.1:1234/v1'}
+                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://your-gpuaas-endpoint.example/v1' : 'http://127.0.0.1:1234/v1'}
                       value={providerConfigs[provider]?.baseUrl || ''}
                       onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], baseUrl: e.target.value } }))}
                     />
-                    {provider === 'openai-compatible' && (
+                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && (
                       <>
-                        <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">API Key <span className="opacity-60">(leave empty for local servers)</span></label>
+                        <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
                         <input
                           type="password"
                           className="mb-2 w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
-                          placeholder="sk-... (optional for local)"
+                          placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
                           value={providerConfigs[provider]?.apiKey || ''}
                           onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: e.target.value } }))}
+                        />
+                      </>
+                    )}
+                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && (
+                      <>
+                        <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">Estimated Monthly Budget (USD)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          className="mb-2 w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
+                          value={remoteBudgetUsd}
+                          onChange={(e) => {
+                            const next = Number(e.target.value);
+                            if (Number.isFinite(next) && next > 0) setRemoteBudgetUsd(next);
+                          }}
                         />
                       </>
                     )}

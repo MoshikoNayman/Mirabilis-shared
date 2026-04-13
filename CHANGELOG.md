@@ -2,6 +2,65 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S24] — 2026-04-13
+
+### Multi-Provider Expansion: OpenRouter, Groq, GPUaaS + Build Reliability
+
+#### New AI Providers
+- **OpenRouter** (`openrouter`): Routes to 200+ models via a single API key. Default base URL `https://openrouter.ai/api/v1`, default model `openai/gpt-4o-mini`. Free tier available.
+- **Groq** (`groq`): Ultra-fast inference on Groq LPU chips. Default base URL `https://api.groq.com/openai/v1`, default model `llama-3.1-8b-instant`. Free tier available.
+- **GPUaaS Endpoint** (`gpuaas`): Generic OpenAI-compatible remote endpoint for any GPU-as-a-service provider (Together AI, Fireworks, RunPod, vLLM gateway, etc.). Configurable base URL and API key.
+
+#### Previously Added Providers (in this session)
+- **OpenAI** (`openai`): Direct OpenAI API, default model `gpt-4o-mini`.
+- **Grok** (`grok`): xAI API, default model `grok-3-mini`.
+- **Gemini** (`gemini`): Google AI via OpenAI-compatible endpoint, default model `gemini-2.0-flash`.
+- **Claude** (`claude`): Native Anthropic adapter (`/v1/messages`), default model `claude-3-5-sonnet-latest`.
+
+#### Provider UX Improvements
+- Provider dropdown shows Local/Remote scope labels under each option.
+- Renamed `Custom Endpoint` → `Local/Custom Endpoint` for clarity.
+- Per-provider info banners in Configure endpoint panel (base URL, key format, link context).
+- API key placeholders show expected key prefix (`sk-...`, `gsk_...`, `sk-or-...`, `AIza...`, `sk-ant-...`).
+- Key required/optional label adapts per provider.
+- Estimated monthly budget bar shown for all remote providers (configure in endpoint panel).
+- Cost rate cards added for all new providers (Groq, OpenRouter, GPUaaS).
+- Provider-aware auto-model resolution: `auto` mode resolves to a sensible per-provider default instead of sending `auto` to the API.
+- Stream stall watchdog (120 s) protects against infinite hangs on local slow models.
+- No forced fallback from remote provider to Ollama on transient errors.
+
+#### Backend / Health API
+- Provider health endpoint whitelist extended with all new provider IDs.
+- Correct default base URLs resolved server-side so health probes work with key-only config.
+- Auth headers sent during health probe (Bearer for most, `X-Api-Key` for Anthropic).
+- Per-provider actionable hint messages (401/403 vs unreachable vs missing key).
+- Graceful startup error handling: `EADDRINUSE` and `EACCES` now exit with a readable message instead of crashing with an unhandled error event.
+
+#### Build Fix
+- Removed `next/font/google` network fetch from layout (`JetBrains Mono`, `Plus Jakarta Sans`). These fetches failed at build time in TLS-restricted environments. Replaced with local CSS variable fallbacks; fonts still applied via stack-based `--font-ui` / `--font-mono` variables in `globals.css`.
+
+---
+
+## [26.3R1-S23] — 2026-04-13
+
+### Provider Config Truthfulness & Platform Context
+
+- **Honest system prompt**: Assistant no longer claims "running entirely on-device" when a remote provider is selected. System context dynamically reflects local vs remote provider selection.
+- **Provider-aware default prompt**: `buildDefaultSystemPrompt(providerId)` switches wording based on whether the active provider is local (Ollama/KoboldCpp) or remote.
+
+---
+
+## [26.3R1-S22] — 2026-04-13
+
+### Hydration, CORS & Nested-Button Fixes
+
+- **Suppressed browser-extension hydration warnings**: Added `suppressHydrationWarning` to `<body>` in `layout.js`; prevents false-positive React hydration mismatches injected by tools like Grammarly.
+- **CORS loopback fix**: Backend now accepts both `localhost` and `127.0.0.1` origins at any port, fixing `Load failed` / `Failed to fetch` errors when browser and server use different loopback representations.
+- **Nested button fix**: Replaced inner `<button>` inside cancel-install control with `<span role="button">` to fix invalid HTML and React hydration error.
+- **Startup URL display**: Launcher now always shows `http://localhost:5173` instead of `127.0.0.1` for consistency with browser CORS expectations.
+
+---
+
 ## [26.3R1-S21] — 2026-04-12
 
 ### Auto-Install on Startup

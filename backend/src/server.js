@@ -362,28 +362,34 @@ app.get('/health', async (_req, res) => {
   res.json({ ok: true });
 });
 
-async function probeProviderTargets(targets) {
+async function probeProviderTargets(targets, options = {}) {
   let lastError = '';
+  let lastStatus = 0;
   for (const target of targets) {
     if (!target) continue;
     try {
       const response = await fetch(target, {
         method: 'GET',
+        headers: options.headers,
         signal: AbortSignal.timeout(4000)
       });
-      return { reachable: true, target, status: response.status };
+      lastStatus = response.status;
+      if (response.ok) {
+        return { reachable: true, target, status: response.status };
+      }
+      lastError = `HTTP ${response.status}`;
     } catch (error) {
       lastError = error?.message || 'fetch failed';
     }
   }
-  return { reachable: false, target: targets[0] || '', error: lastError || 'fetch failed' };
+  return { reachable: false, target: targets[0] || '', status: lastStatus || undefined, error: lastError || 'fetch failed' };
 }
 
 app.get('/api/providers/health', async (req, res) => {
   const provider = String(req.query?.provider || config.aiProvider || 'ollama').trim();
   const overrideBaseUrl = String(req.query?.baseUrl || '').trim();
 
-  if (!['ollama', 'openai-compatible', 'koboldcpp'].includes(provider)) {
+  if (!['ollama', 'openai', 'grok', 'groq', 'openrouter', 'gemini', 'claude', 'gpuaas', 'openai-compatible', 'koboldcpp'].includes(provider)) {
     res.status(400).json({ error: `Unknown provider: ${provider}` });
     return;
   }
@@ -402,8 +408,48 @@ app.get('/api/providers/health', async (req, res) => {
     return;
   }
 
-  const configuredBaseUrl = provider === 'koboldcpp' ? config.koboldBaseUrl : config.openAIBaseUrl;
+  const configuredBaseUrl = provider === 'koboldcpp'
+    ? config.koboldBaseUrl
+    : provider === 'openai'
+    ? 'https://api.openai.com/v1'
+    : provider === 'grok'
+    ? 'https://api.x.ai/v1'
+    : provider === 'groq'
+    ? 'https://api.groq.com/openai/v1'
+    : provider === 'openrouter'
+    ? 'https://openrouter.ai/api/v1'
+    : provider === 'gemini'
+    ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+    : provider === 'claude'
+    ? 'https://api.anthropic.com'
+    : provider === 'gpuaas'
+    ? ''
+    : config.openAIBaseUrl;
   const normalizedBase = String(overrideBaseUrl || configuredBaseUrl || '').replace(/\/$/, '');
+  const apiKey = String(req.query?.apiKey || config.openAIApiKey || '').trim();
+
+  if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && !apiKey) {
+    res.status(400).json({
+      ok: false,
+      provider,
+      reachable: false,
+      baseUrl: normalizedBase,
+      hint: provider === 'grok'
+        ? 'xAI API key is required.'
+        : provider === 'groq'
+        ? 'Groq API key is required.'
+        : provider === 'openrouter'
+        ? 'OpenRouter API key is required.'
+        : provider === 'gemini'
+        ? 'Google AI API key is required.'
+        : provider === 'claude'
+        ? 'Anthropic API key is required.'
+        : provider === 'gpuaas'
+        ? 'GPUaaS endpoint API key is required.'
+        : 'OpenAI API key is required.'
+    });
+    return;
+  }
   if (!normalizedBase) {
     res.status(400).json({
       ok: false,
@@ -415,8 +461,13 @@ app.get('/api/providers/health', async (req, res) => {
     return;
   }
 
-  const targets = [`${normalizedBase}/models`, normalizedBase];
-  const result = await probeProviderTargets(targets);
+  const headers = provider === 'claude'
+    ? (apiKey ? { 'X-Api-Key': apiKey, 'anthropic-version': '2023-06-01' } : undefined)
+    : apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined;
+  const targets = provider === 'claude'
+    ? [`${normalizedBase}/v1/models`, normalizedBase]
+    : [`${normalizedBase}/models`, normalizedBase];
+  const result = await probeProviderTargets(targets, { headers });
   res.json({
     ok: true,
     provider,
@@ -426,6 +477,32 @@ app.get('/api/providers/health', async (req, res) => {
       ? ''
       : provider === 'koboldcpp'
       ? 'Start KoboldCpp with --openai-api (default http://127.0.0.1:5001/v1).'
+      : provider === 'openai'
+      ? ((result.status === 401 || result.status === 403)
+        ? 'OpenAI key rejected. Check API key, project permissions, and billing/quota.'
+        : 'Check your OpenAI API key and internet connectivity.')
+      : provider === 'grok'
+      ? ((result.status === 401 || result.status === 403)
+        ? 'xAI key rejected. Check API key permissions/plan for the selected model.'
+        : 'Check your xAI API key and internet connectivity.')
+      : provider === 'groq'
+      ? ((result.status === 401 || result.status === 403)
+        ? 'Groq key rejected. Check API key permissions and model availability.'
+        : 'Check your Groq API key and internet connectivity.')
+      : provider === 'openrouter'
+      ? ((result.status === 401 || result.status === 403)
+        ? 'OpenRouter key rejected. Check API key permissions and account credits.'
+        : 'Check your OpenRouter API key and internet connectivity.')
+      : provider === 'gemini'
+      ? ((result.status === 401 || result.status === 403)
+        ? 'Google AI key rejected. Check API key restrictions and project permissions.'
+        : 'Check your Google AI API key and internet connectivity.')
+      : provider === 'claude'
+      ? ((result.status === 401 || result.status === 403)
+        ? 'Anthropic key rejected. Check API key permissions, workspace access, and billing.'
+        : 'Check your Anthropic API key and internet connectivity.')
+      : provider === 'gpuaas'
+      ? 'Set your GPUaaS OpenAI-compatible endpoint URL and API key.'
       : 'Start your OpenAI-compatible server (LM Studio/llama.cpp/Oobabooga) or update Base URL.'
   });
 });
@@ -1919,7 +1996,9 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     role: 'system',
     content: [
       '=== MIRABILIS PLATFORM CONTEXT (CONFIDENTIAL) ===',
-      'You are the assistant inside Mirabilis AI, a private local app running on the user device.',
+      effectiveProvider === 'ollama' || effectiveProvider === 'koboldcpp'
+        ? 'You are the assistant inside Mirabilis AI, a private local app running on the user device. The current model runtime is local to the device.'
+        : 'You are the assistant inside Mirabilis AI, a private local app on the user device. The user currently selected a remote AI provider, so do not claim the model itself is running entirely on-device.',
       'Answer directly and accurately. Prefer concise answers unless user asks for depth.',
       'If web research context appears in the user message, treat it as current and trustworthy context.',
       'If asked who created Mirabilis AI, answer: Moshiko Nayman.',
@@ -2246,7 +2325,20 @@ app.post('/mcp', mcpServerHandler);
 
 await ensureStoreFile(config.chatStorePath);
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`Backend listening on http://localhost:${config.port}`);
   console.log(`MCP server endpoint: http://localhost:${config.port}/mcp`);
+});
+
+server.on('error', (error) => {
+  if (error?.code === 'EADDRINUSE') {
+    console.error(`Port ${config.port} is already in use. Stop the existing Mirabilis backend or change the port.`);
+    process.exit(1);
+  }
+  if (error?.code === 'EACCES') {
+    console.error(`Permission denied while binding to port ${config.port}. Try a different port.`);
+    process.exit(1);
+  }
+  console.error('Failed to start backend server:', error?.message || error);
+  process.exit(1);
 });

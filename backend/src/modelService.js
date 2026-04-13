@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { streamOllamaChat, listOllamaModels } from './providers/ollama.js';
 import { streamOpenAICompatibleChat, listOpenAICompatibleModels } from './providers/openaiCompatible.js';
+import { listAnthropicModels, streamAnthropicChat } from './providers/anthropic.js';
 
 const CURATED_OLLAMA_MODELS = [
   // ── MSQ family — Mirabilis native models (built with training/msq/setup.sh)
@@ -220,8 +221,27 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
 }
 
 export async function getEffectiveModel({ provider, model, config }) {
-  if (provider === 'openai-compatible') return config.openAIModel;
-  if (provider === 'koboldcpp') return config.koboldModel || config.openAIModel;
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'gpuaas' || provider === 'openai-compatible') {
+    const preferred = model && model !== 'auto' ? model : config.openAIModel;
+    if (preferred && preferred !== 'auto') return preferred;
+    if (provider === 'openai') return 'gpt-4o-mini';
+    if (provider === 'grok') return 'grok-3-mini';
+    if (provider === 'groq') return 'llama-3.1-8b-instant';
+    if (provider === 'openrouter') return 'openai/gpt-4o-mini';
+    if (provider === 'gemini') return 'gemini-2.0-flash';
+    if (provider === 'gpuaas') return 'model.gguf';
+    return 'model.gguf';
+  }
+  if (provider === 'claude') {
+    const preferred = model && model !== 'auto' ? model : config.openAIModel;
+    if (preferred && preferred !== 'auto') return preferred;
+    return 'claude-3-5-sonnet-latest';
+  }
+  if (provider === 'koboldcpp') {
+    const preferred = model && model !== 'auto' ? model : (config.koboldModel || config.openAIModel);
+    if (preferred && preferred !== 'auto') return preferred;
+    return 'koboldcpp';
+  }
 
   // For ollama: verify requested/configured model is installed; fall back to first installed model
   const preferred = model || config.ollamaModel;
@@ -249,8 +269,21 @@ export async function listModels(config, provider = config.aiProvider, options =
   const overrideBaseUrl = typeof options?.overrideBaseUrl === 'string' ? options.overrideBaseUrl.trim() : '';
   const overrideApiKey = typeof options?.overrideApiKey === 'string' ? options.overrideApiKey.trim() : undefined;
 
-  if (provider === 'openai-compatible') {
-    const baseUrl = overrideBaseUrl || config.openAIBaseUrl;
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'gpuaas' || provider === 'openai-compatible') {
+    const defaultBase = provider === 'openai'
+      ? 'https://api.openai.com/v1'
+      : provider === 'grok'
+      ? 'https://api.x.ai/v1'
+      : provider === 'groq'
+      ? 'https://api.groq.com/openai/v1'
+      : provider === 'openrouter'
+      ? 'https://openrouter.ai/api/v1'
+      : provider === 'gemini'
+      ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+      : provider === 'gpuaas'
+      ? ''
+      : config.openAIBaseUrl;
+    const baseUrl = overrideBaseUrl || defaultBase;
     const apiKey = overrideApiKey !== undefined ? overrideApiKey : config.openAIApiKey;
     const remote = await listOpenAICompatibleModels({ baseUrl, apiKey }).catch(() => []);
     const locals = await listLocalGgufModels();
@@ -265,6 +298,31 @@ export async function listModels(config, provider = config.aiProvider, options =
       id: config.openAIModel,
       label: prettifyEndpointModelLabel(config.openAIModel),
       group: 'Configured endpoint',
+      available: true,
+      selected: true,
+      paramSize: null
+    }];
+  }
+
+  if (provider === 'claude') {
+    const baseUrl = overrideBaseUrl || 'https://api.anthropic.com';
+    const apiKey = overrideApiKey !== undefined ? overrideApiKey : config.openAIApiKey;
+    const remote = await listAnthropicModels({ baseUrl, apiKey }).catch(() => []);
+    if (remote.length > 0) {
+      const selectedId = config.openAIModel;
+      return remote.map((item) => ({
+        id: item.id,
+        label: item.label || prettifyEndpointModelLabel(item.id),
+        group: 'Anthropic Models',
+        available: true,
+        selected: String(item.id) === String(selectedId || ''),
+        paramSize: null
+      }));
+    }
+    return [{
+      id: config.openAIModel || 'claude-3-5-sonnet-latest',
+      label: prettifyEndpointModelLabel(config.openAIModel || 'claude-3-5-sonnet-latest'),
+      group: 'Anthropic Models',
       available: true,
       selected: true,
       paramSize: null
@@ -357,9 +415,22 @@ export async function listModels(config, provider = config.aiProvider, options =
 }
 
 export async function streamWithProvider({ provider, model, messages, config, signal, onToken, overrideBaseUrl, overrideApiKey, temperature, maxTokens }) {
-  if (provider === 'openai-compatible') {
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'gpuaas' || provider === 'openai-compatible') {
+    const defaultBase = provider === 'openai'
+      ? 'https://api.openai.com/v1'
+      : provider === 'grok'
+      ? 'https://api.x.ai/v1'
+      : provider === 'groq'
+      ? 'https://api.groq.com/openai/v1'
+      : provider === 'openrouter'
+      ? 'https://openrouter.ai/api/v1'
+      : provider === 'gemini'
+      ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+      : provider === 'gpuaas'
+      ? ''
+      : config.openAIBaseUrl;
     return streamOpenAICompatibleChat({
-      baseUrl: overrideBaseUrl || config.openAIBaseUrl,
+      baseUrl: overrideBaseUrl || defaultBase,
       apiKey: overrideApiKey !== undefined ? overrideApiKey : config.openAIApiKey,
       model,
       messages,
@@ -367,6 +438,19 @@ export async function streamWithProvider({ provider, model, messages, config, si
       onToken,
       temperature,
       maxTokens,
+      providerLabel: provider === 'openai'
+        ? 'OpenAI'
+        : provider === 'grok'
+        ? 'Grok'
+        : provider === 'groq'
+        ? 'Groq'
+        : provider === 'openrouter'
+        ? 'OpenRouter'
+        : provider === 'gemini'
+        ? 'Gemini'
+        : provider === 'gpuaas'
+        ? 'GPUaaS'
+        : 'OpenAI-compatible',
     });
   }
 
@@ -380,6 +464,21 @@ export async function streamWithProvider({ provider, model, messages, config, si
       onToken,
       temperature,
       maxTokens,
+      providerLabel: 'KoboldCpp',
+    });
+  }
+
+  if (provider === 'claude') {
+    return streamAnthropicChat({
+      baseUrl: overrideBaseUrl || 'https://api.anthropic.com',
+      apiKey: overrideApiKey !== undefined ? overrideApiKey : config.openAIApiKey,
+      model,
+      messages,
+      signal,
+      onToken,
+      temperature,
+      maxTokens,
+      providerLabel: 'Claude',
     });
   }
 
