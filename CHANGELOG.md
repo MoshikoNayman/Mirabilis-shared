@@ -2,6 +2,22 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S19] — 2026-04-12
+
+### Cutover Complete: Pure JavaScript Autonomy
+
+- **Removed shell script wrappers**: Deleted `install.sh`, `run.sh`, `uninstall.sh` from repository.
+- **Pure JS cutover**: All operations now exclusively via `node run.js`. No shell dependencies, works cross-platform.
+- **Updated README**: New architecture section documenting 100% pure JavaScript design.
+- **User-facing changes**:
+  - `./install.sh` → `node run.js install`
+  - `./run.sh [provider]` → `node run.js [provider]`
+  - `./run.sh uninstall` → `node run.js uninstall`
+  - All commands (`stop`, `restart`, `doctor`, `logs`) via `node run.js`
+- **Significance**: Completes pre-cutover strategy. No more shell wrapper fallbacks. Production-ready pure JS launcher.
+
+---
+
 ## [26.3R1-S18] — 2026-04-12
 
 ### Logs Command for Real-Time Diagnostics
@@ -15,6 +31,7 @@ Versioning follows Junos-style tags.
 ---
 
 ## [26.3R1-S17] — 2026-04-12
+
 
 ### JS Launcher Full Autonomy (Install/Uninstall Migrated)
 

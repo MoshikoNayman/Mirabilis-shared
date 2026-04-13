@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version: 26.3R1-S18
+Version: 26.3R1-S19
 Owner and Builder: Moshiko Nayman
 
 Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.
@@ -8,54 +8,72 @@ Mirabilis AI is a local-first assistant app with a Next.js frontend, Express bac
 ## Quick Start
 
 ```bash
-./install.sh
-./run.sh
+node run.js install
+node run.js
 ```
 
 Ollama is a required runtime for the default `ui` startup flow.
 
 Open: http://localhost:3000
 
-`./run.sh` starts Mirabilis and launches all available local providers for direct switching from the UI.
+`node run.js` starts Mirabilis and launches all available local providers for direct switching from the UI.
 
-`run.js` is the launcher source of truth.
-`run.sh` is kept as safe-mode fallback wrapper and delegates to `run.js`.
+## Commands
 
-## JS Launcher Pre-Cutover Requirements
+All operations run pure JavaScript—no shell scripts required.
 
-Pre-cutover means `run.sh` remains the default user entrypoint and `run.js` must prove parity first.
+```
+node run.js                        # Start with UI provider selection
+node run.js ollama                 # Start with Ollama
+node run.js openai-compatible      # Start with llama-server
+node run.js koboldcpp              # Start with KoboldCpp
+node run.js install                # Install/reinstall dependencies
+node run.js uninstall              # Remove dependencies and caches
+node run.js stop                   # Stop running services
+node run.js restart [provider]     # Restart services
+node run.js doctor                 # Validate environment
+node run.js logs                   # Real-time log tail (for debugging)
+node run.js --help                 # Show full help
+```
 
-### Required parity checks
+## Flags
 
-- Functional parity: `ui`, `ollama`, `openai-compatible`, `koboldcpp`, `stop`, `restart`, `doctor`, and `--log` all behave as expected.
-- Startup reliability: backend/frontend/image-service readiness checks pass and startup fails fast with actionable errors.
-- Stop reliability: PID-state stop works; fallback pattern stop works when PID state is missing.
-- Install reliability: model install, progress, cancel, retry, and refresh-survival all work from GUI.
-- Recovery paths: provider unavailable/fallback scenarios still recover to usable state.
+```
+--log                 # Stream backend logs to terminal
+--verbose             # Extended startup diagnostics
+```
 
-### Suggested pre-cutover verification command set
+## Examples
 
 ```bash
-./run.sh doctor
-./run.sh restart --log
+node run.js                        # Default: choose provider from UI
+node run.js ollama --verbose       # Start with Ollama + detailed output
+node run.js restart openai-compatible --log  # Restart with OpenAI-compatible + logs
+node run.js logs                   # Debug: watch real-time service logs
+node run.js doctor                 # Check environment health
+```
+
+## Verification
+
+```bash
+node run.js doctor
+node run.js logs &          # Background
+node run.js --verbose       # In another terminal
 curl -sS http://127.0.0.1:4000/health
 curl -sS http://127.0.0.1:4000/api/models
 curl -sS http://127.0.0.1:4000/api/models/install-jobs
 ```
 
-## Cutover Rollback Plan (When You Decide To Cut Over)
+## Architecture
 
-Do this right before cutover so rollback is one command.
+Mirabilis is 100% pure JavaScript for the launcher and all lifecycle operations:
+- **Installation**: `node run.js install` — validates prerequisites, installs npm/Python deps, downloads provider binaries
+- **Startup**: `node run.js [provider]` — orchestrates backend, frontend, image-service, and AI providers
+- **Lifecycle**: `stop`, `restart`, `doctor`, `logs`, `uninstall` — all pure JS, no shell scripts
+- **No shell dependencies** — works cross-platform without shell script fallbacks
+- **Autonomous** — fully self-contained; shell wrappers optional for legacy compatibility
 
-1. Create a dedicated GitHub fork for cutover safety.
-2. Tag pre-cutover state in both repos, for example:
-  - `pre-js-cutover-26.3R1-S12`
-3. Create branch for cutover work, for example:
-  - `cutover/js-launcher-primary`
-4. Keep `run.sh` wrapper in place for at least one release after cutover.
-5. If rollback is needed:
-  - Reset deployment branch to pre-cutover tag
-  - Re-release immediately from that tag
+No shell scripts (`install.sh`, `run.sh`, `uninstall.sh`) are included in this repo. All operations via `node run.js`.
 
 ## Features
 
