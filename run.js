@@ -291,13 +291,17 @@ async function ensureOllamaModel() {
     const res = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(4000) });
     const body = await res.json();
     const count = Array.isArray(body?.models) ? body.models.length : 0;
-    if (count >= 1) return true;
+    if (count >= 1) {
+      statusLine('OK', `Ollama: ${count} model(s) available`);
+      return true;
+    }
   } catch {
     // Continue to pull attempt.
   }
 
-  process.stdout.write('No Ollama models found. Pulling qwen2.5:0.5b (one-time)...\n');
+  statusLine('INFO', 'No Ollama models found — pulling qwen2.5:0.5b (one-time, ~400MB)...');
   const code = await runForeground('ollama', ['pull', 'qwen2.5:0.5b'], ROOT_DIR);
+  if (code === 0) statusLine('OK', 'Ollama default model ready');
   return code === 0;
 }
 
@@ -463,6 +467,24 @@ async function runInstall() {
     await installOllama();
   }
   statusLine('OK', 'Ollama: installed');
+
+  // Ensure Ollama service is running so we can check/pull models
+  const ollamaRunning = await endpointReady('http://127.0.0.1:11434');
+  if (!ollamaRunning) {
+    statusLine('INFO', 'Starting Ollama service...');
+    const ollamaLog = path.join(os.tmpdir(), 'ollama-install.log');
+    const ollamaOut = fs.openSync(ollamaLog, 'a');
+    const ollamaProc = spawn('ollama', ['serve'], { stdio: ['ignore', ollamaOut, ollamaOut], detached: true });
+    ollamaProc.unref();
+    // Wait up to 10s for it to become ready
+    for (let i = 0; i < 10; i++) {
+      await sleep(1000);
+      if (await endpointReady('http://127.0.0.1:11434')) break;
+    }
+  }
+
+  // Ensure at least one Ollama model is available — pull default if none
+  await ensureOllamaModel();
 
   // Install backend
   statusLine('INFO', 'Installing backend dependencies...');
