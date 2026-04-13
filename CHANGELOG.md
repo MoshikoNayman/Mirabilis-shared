@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S18] — 2026-04-12
+
+### Logs Command for Real-Time Diagnostics
+
+- **Added `node run.js logs`** — Real-time tail of backend, frontend, and image-service logs with unified output.
+- Each log line prefixed with source: `[BACKEND]`, `[FRONTEND]`, `[IMAGE]` for easy correlation.
+- Solves immediate debugging pain: no more hunting in `/tmp/` for errors.
+- Graceful shutdown on Ctrl+C.
+- Useful alongside startup failures: run `node run.js logs` in one terminal while `node run.js ui` runs in another.
+
+---
+
 ## [26.3R1-S17] — 2026-04-12
 
 ### JS Launcher Full Autonomy (Install/Uninstall Migrated)
@@ -20,6 +32,7 @@ Versioning follows Junos-style tags.
 ---
 
 ## [26.3R1-S16] — 2026-04-12
+
 
 ### Backend Error Visibility & Installer Hardening
 

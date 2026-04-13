@@ -93,7 +93,7 @@ function printStartupSummary(provider, verbose) {
 }
 
 function usage() {
-  process.stdout.write(`Usage: ./run.sh [provider|command] [args] [--log] [--verbose]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  install            - Delegate to install.sh (pre-cutover compatibility path)\n  uninstall          - Delegate to uninstall.sh (pre-cutover compatibility path)\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log --verbose\n  ./run.sh doctor\n  ./run.sh restart koboldcpp --log\n  ./run.sh install\n  ./run.sh uninstall\n  ./run.sh stop\n\n`);
+  process.stdout.write(`Usage: ./run.sh [provider|command] [args] [--log] [--verbose]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log --verbose\n  ./run.sh doctor\n  ./run.sh logs\n  ./run.sh restart koboldcpp --log\n  ./run.sh install\n  ./run.sh uninstall\n  ./run.sh stop\n\n`);
 }
 
 function parseArgs(argv) {
@@ -699,6 +699,58 @@ async function runDoctor() {
   }
 }
 
+async function runLogs() {
+  const logFiles = {
+    backend: path.join(os.tmpdir(), 'backend.log'),
+    frontend: path.join(os.tmpdir(), 'frontend.log'),
+    image: path.join(os.tmpdir(), 'image-service.log')
+  };
+
+  statusLine('INFO', 'Tailing logs (Ctrl+C to stop)...');
+  process.stdout.write('\n');
+
+  const tails = {};
+  let allReady = false;
+
+  // Start tail for each log file
+  Object.entries(logFiles).forEach(([name, logPath]) => {
+    if (!fs.existsSync(logPath)) {
+      fs.writeFileSync(logPath, '');
+    }
+
+    const tail = spawn('tail', ['-f', logPath]);
+    tails[name] = tail;
+
+    tail.stdout.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(l => l.trim());
+      lines.forEach(line => {
+        process.stdout.write(`[${name.toUpperCase()}] ${line}\n`);
+      });
+    });
+
+    tail.stderr.on('data', (data) => {
+      process.stderr.write(`[${name.toUpperCase()}] ERROR: ${data.toString()}\n`);
+    });
+
+    tail.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        statusLine('WARN', `${name} tail stopped (exit ${code})`);
+      }
+    });
+  });
+
+  // Graceful shutdown
+  process.on('SIGINT', () => {
+    Object.values(tails).forEach(tail => {
+      if (tail && !tail.killed) {
+        try { tail.kill('SIGTERM'); } catch { /* ignore */ }
+      }
+    });
+    process.stdout.write('\nLogs stopped.\n');
+    process.exit(0);
+  });
+}
+
 function cleanup() {
   for (const key of ['backend', 'frontend', 'image', 'llama', 'kobold']) {
     if (managed[key] && !managed[key].killed) {
@@ -726,6 +778,11 @@ async function main() {
     return;
   }
 
+  if (mode === 'logs') {
+    await runLogs();
+    return;
+  }
+
   if (mode === 'install') {
     await withPhase('Install', runInstall);
     return;
@@ -745,7 +802,7 @@ async function main() {
   const providerCandidate = isRestart ? (arg || 'ui') : mode;
   const provider = normalizeProvider(providerCandidate);
   if (!provider) {
-    process.stderr.write('Unknown mode/provider. Use one of: ui, ollama, openai-compatible, koboldcpp, stop, restart, doctor, install, uninstall\n');
+    process.stderr.write('Unknown mode/provider. Use one of: ui, ollama, openai-compatible, koboldcpp, stop, restart, doctor, logs, install, uninstall\n');
     usage();
     process.exit(1);
   }
