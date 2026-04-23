@@ -2509,9 +2509,12 @@ app.get('/api/providers/install-stream', async (req, res) => {
         child.on('error', reject);
       });
       const extractedBin = `llama-server${ext}`;
-      const extracted = join(PROVIDERS_DIR, 'build', 'bin', extractedBin);
-      if (!existsSync(extracted)) throw new Error(`Could not find extracted binary at build/bin/${extractedBin}`);
-      await rename(extracted, binPath);
+      // Windows zip is flat; macOS/Linux zips use build/bin/
+      const extractedFlat = join(PROVIDERS_DIR, extractedBin);
+      const extractedNested = join(PROVIDERS_DIR, 'build', 'bin', extractedBin);
+      const extracted = existsSync(extractedFlat) ? extractedFlat : existsSync(extractedNested) ? extractedNested : null;
+      if (!extracted) throw new Error(`Could not find extracted binary (${extractedBin})`);
+      if (extracted !== binPath) await rename(extracted, binPath);
       if (platform !== 'win32') await chmod(binPath, 0o755);
       try { const { rm } = await import('node:fs/promises'); await rm(join(PROVIDERS_DIR, 'build'), { recursive: true, force: true }); await rm(zipPath, { force: true }); } catch {}
       send('done', 'llama-server installed successfully');
