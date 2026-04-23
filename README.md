@@ -10,13 +10,14 @@ Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js fronten
 ## Quick Start
 
 ```bash
-node run.js install
 node run.js
 ```
 
 Open: **http://localhost:3000**
 
-`node run.js install` installs all dependencies (npm + Python venv). `node run.js` starts the backend, frontend, image service, and any configured local providers. No shell scripts required.
+`node run.js` starts the backend, frontend, image service, and any configured local providers. **Dependencies are installed automatically on first run** — no separate install step needed. No shell scripts required.
+
+> To install or reinstall dependencies explicitly: `node run.js install`
 
 ---
 
@@ -201,7 +202,7 @@ Mirabilis can connect **to** external MCP servers (Junos, Synology, Debian, etc.
 
 Mirabilis is 100% pure JavaScript for all launcher and lifecycle operations:
 
-- **Installation** — `node run.js install`: validates prerequisites, installs npm/Python deps, downloads provider binaries.
+- **Installation** — automatic on first run; or explicitly via `node run.js install`: validates prerequisites, installs npm/Python deps, downloads provider binaries.
 - **Startup** — `node run.js [provider]`: orchestrates backend (Express, port 4000), frontend (Next.js, port 3000), image-service (port 7860), and local AI providers.
 - **Lifecycle** — `stop`, `restart`, `doctor`, `logs`, `uninstall`: all pure JS, no shell scripts.
 - **Self-healing** — auto-installs missing dependencies on startup; auto-creates missing provider adapter files.

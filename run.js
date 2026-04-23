@@ -479,6 +479,22 @@ async function installOllama() {
     const code = await runForeground('sh', ['-c', 'curl -fsSL https://ollama.com/install.sh | sh'], ROOT_DIR);
     if (code !== 0) throw new Error('Ollama auto-install failed.\nInstall manually: https://ollama.com/download');
     statusLine('OK', 'Ollama installed');
+  } else if (process.platform === 'win32') {
+    statusLine('INFO', 'Installing Ollama via official PowerShell installer (this may take a minute)...');
+    statusLine('INFO', 'Note: Administrator privileges may be required.');
+    const code = await runForeground('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+      'irm https://ollama.com/install.ps1 | iex'
+    ], ROOT_DIR);
+    if (code !== 0) {
+      throw new Error(
+        'Ollama auto-install via PowerShell failed.\n' +
+        '  Possible causes: no admin rights, network error, or ExecutionPolicy restrictions.\n' +
+        '  Install manually: https://ollama.com/download\n' +
+        '  Then rerun: node run.js'
+      );
+    }
+    statusLine('OK', 'Ollama installed via PowerShell installer');
   } else {
     throw new Error('Ollama not installed.\nDownload and install from: https://ollama.com/download\nThen rerun: node run.js');
   }
