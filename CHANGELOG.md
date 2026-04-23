@@ -12,7 +12,7 @@ Versioning follows Junos-style tags.
 - **Chat branching**: Any conversation can be cloned into a new branch to explore alternate paths without mutating the source.
 - **Snapshots**: Active chats can save restore points and roll back to a selected snapshot later.
 - **Sidebar metadata**: Chat list rows show branch and snapshot badges.
-- **In-app provider install**: Local providers (`llama-server`, `KoboldCpp`) are greyed out when their binary is missing. Install inline with live progress streaming.
+- **In-app provider install**: Local providers (`llama-server`, `KoboldCpp`) are greyed out when their binary is missing. Install inline with live progress streaming. Supports macOS arm64/x64, Linux x64, and Windows (KoboldCpp only).
 - **In-app provider uninstall**: Installed local providers show an Uninstall button that removes the binary immediately.
 - **Image service log cleanup**: Verbose HuggingFace HTTP logs no longer printed to terminal - redirected to log file only.
 - **Sidebar button alignment**: New Chat / Delete / Clear All buttons stretch to full sidebar width.
