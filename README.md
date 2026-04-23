@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-**Version:** 26.3R1-S25  
+**Version:** 26.3R1-S26  
 **Author:** Moshiko Nayman
 
 Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API—your choice, per conversation.
@@ -31,7 +31,7 @@ Mirabilis supports local and remote providers, switchable live from the UI. Conf
 |---|---|---|
 | **Ollama** | Default local inference engine. Pull and manage models from the UI. | `node run.js ollama` |
 | **Local/Custom Endpoint** | Any OpenAI-compatible local server: LM Studio, llama-server, llama.cpp, Oobabooga, etc. | `node run.js openai-compatible` |
-| **KoboldCpp** | KoboldCpp local engine (separate install required). | `node run.js koboldcpp` |
+| **KoboldCpp** | KoboldCpp local engine. Install directly from the provider dropdown if not present. | `node run.js koboldcpp` |
 
 ### Remote Providers
 
@@ -52,6 +52,7 @@ All remote providers require an API key. Configure in the **Configure endpoint**
 ### Provider UX
 
 - Dropdown shows **Local** / **Remote** scope under each provider name.
+- Local providers that require a binary (`llama-server`, `KoboldCpp`) are **greyed out** when not installed — click **Install** inline to download and install automatically, or **Uninstall** to remove.
 - Per-provider hint banner in the config panel shows the expected base URL and key format.
 - **Estimated monthly budget bar** — set a USD budget; the bar tracks estimated token spend against it (shown for all remote providers).
 - **Auto model resolution** — selecting `auto` picks a sensible default model per provider (e.g. `gpt-4o-mini` for OpenAI, `llama-3.1-8b-instant` for Groq, `openai/gpt-4o-mini` for OpenRouter).

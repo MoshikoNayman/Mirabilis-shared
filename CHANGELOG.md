@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S26] — 2026-04-23
+
+### Provider Binary Management + UI Polish
+
+- **In-app provider install**: Local providers (`llama-server`, `KoboldCpp`) are now greyed out in the provider dropdown when their binary is missing. An **Install** button appears inline and streams live download/install progress. Status refreshes automatically on completion.
+- **In-app provider uninstall**: Installed local providers show an **Uninstall** button that removes the binary immediately and resets the provider state.
+- **Image service log cleanup**: Verbose HuggingFace HTTP request logs are no longer printed to the terminal during startup — redirected to the log file only.
+- **Sidebar button alignment**: New Chat / Delete / Clear All buttons now stretch to the full sidebar width, correctly aligned with the chat list below.
+- **Security**: Upgraded `uuid` dependency to clear a moderate audit advisory.
+
+---
+
 ## [26.3R1-S25] — 2026-04-15
 
 ### Chat Control: Instruction Profiles, Branching, and Snapshots
