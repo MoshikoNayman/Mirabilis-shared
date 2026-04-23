@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
-import { mkdir, writeFile, readFile, appendFile, unlink, readdir } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, appendFile, unlink, readdir, rename, chmod } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { exec as cpExec, spawn } from 'node:child_process';
@@ -2442,6 +2442,96 @@ const mcpServerHandler = createMcpServerHandler({
   auditLogPath: mcpServerAuditLogPath
 });
 app.post('/mcp', mcpServerHandler);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local provider binary management
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/providers/local-status', (_req, res) => {
+  const platform = process.platform;
+  const arch = process.arch;
+  const ext = platform === 'win32' ? '.exe' : '';
+  res.json({
+    llamaServer: existsSync(join(PROVIDERS_DIR, `llama-server${ext}`)),
+    koboldcpp: existsSync(join(PROVIDERS_DIR, `koboldcpp${ext}`)),
+    platform,
+    arch,
+    autoInstallSupported: platform === 'darwin',
+  });
+});
+
+app.get('/api/providers/install-stream', async (req, res) => {
+  const provider = req.query.provider;
+  if (!['llama-server', 'koboldcpp'].includes(provider)) {
+    return res.status(400).json({ error: 'Invalid provider' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (type, message) => {
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type, message })}\n\n`);
+  };
+
+  try {
+    const platform = process.platform;
+    const arch = process.arch;
+    const ext = platform === 'win32' ? '.exe' : '';
+
+    if (!existsSync(PROVIDERS_DIR)) await mkdir(PROVIDERS_DIR, { recursive: true });
+
+    if (provider === 'llama-server') {
+      const binPath = join(PROVIDERS_DIR, `llama-server${ext}`);
+      if (existsSync(binPath)) { send('done', 'llama-server is already installed'); res.end(); return; }
+      if (platform !== 'darwin') { send('warn', `Auto-install not supported on ${platform}. Install llama.cpp manually.`); send('done', ''); res.end(); return; }
+
+      const llamaUrl = arch === 'arm64'
+        ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-arm64.zip'
+        : 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-x64.zip';
+      send('info', 'Downloading llama-server…');
+      const fetchRes = await fetch(llamaUrl);
+      if (!fetchRes.ok) throw new Error('Failed to download llama-server');
+      const buf = await fetchRes.arrayBuffer();
+      const zipPath = join(PROVIDERS_DIR, 'llama.zip');
+      await writeFile(zipPath, Buffer.from(buf));
+      send('info', 'Extracting…');
+      await new Promise((resolve, reject) => {
+        const child = spawn('unzip', ['-qo', 'llama.zip'], { cwd: PROVIDERS_DIR });
+        child.on('close', (code) => (code === 0 ? resolve() : reject(new Error('Extraction failed'))));
+        child.on('error', reject);
+      });
+      const extracted = join(PROVIDERS_DIR, 'build', 'bin', 'llama-server');
+      if (existsSync(extracted)) await rename(extracted, binPath);
+      await chmod(binPath, 0o755);
+      try { const { rm } = await import('node:fs/promises'); await rm(join(PROVIDERS_DIR, 'build'), { recursive: true, force: true }); await rm(zipPath, { force: true }); } catch {}
+      send('done', 'llama-server installed successfully');
+    }
+
+    if (provider === 'koboldcpp') {
+      const binPath = join(PROVIDERS_DIR, `koboldcpp${ext}`);
+      if (existsSync(binPath)) { send('done', 'KoboldCpp is already installed'); res.end(); return; }
+      if (platform !== 'darwin' || arch !== 'arm64') { send('warn', `Auto-install only supports macOS arm64. Install KoboldCpp manually.`); send('done', ''); res.end(); return; }
+
+      send('info', 'Fetching latest KoboldCpp release…');
+      const releaseRes = await fetch('https://api.github.com/repos/LostRuins/koboldcpp/releases/latest');
+      const release = await releaseRes.json();
+      const asset = release.assets?.find((a) => a.name === 'koboldcpp-mac-arm64');
+      if (!asset) throw new Error('KoboldCpp release asset not found');
+      send('info', `Downloading ${asset.name}…`);
+      const koboldRes = await fetch(asset.browser_download_url);
+      if (!koboldRes.ok) throw new Error('Failed to download KoboldCpp');
+      const koboldBuf = await koboldRes.arrayBuffer();
+      await writeFile(binPath, Buffer.from(koboldBuf));
+      await chmod(binPath, 0o755);
+      send('done', 'KoboldCpp installed successfully');
+    }
+  } catch (err) {
+    send('error', err.message || 'Installation failed');
+  }
+  if (!res.writableEnded) res.end();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 

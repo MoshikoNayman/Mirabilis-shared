@@ -124,8 +124,8 @@ const PROVIDER_OPTIONS = [
   { id: 'gemini', label: 'Gemini', scope: 'Remote' },
   { id: 'claude', label: 'Claude', scope: 'Remote' },
   { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote' },
-  { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote' },
-  { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local' }
+  { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server' },
+  { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp' }
 ];
 const STREAM_STALL_TIMEOUT_MS = 120000;
 
@@ -1063,6 +1063,8 @@ export default function ChatApp() {
     };
   });
   const [isProviderConfigOpen, setIsProviderConfigOpen] = useState(false);
+  const [localBinaryStatus, setLocalBinaryStatus] = useState({ 'llama-server': null, koboldcpp: null });
+  const [installingBinary, setInstallingBinary] = useState(null); // { provider, lines[], done, error }
   const [customPromptProfiles, setCustomPromptProfiles] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -1318,6 +1320,39 @@ export default function ChatApp() {
       setSystemPrompt(savedPrompt);
     }
   }, []);
+
+  useEffect(() => {
+    api('/api/providers/local-status').then((data) => {
+      if (data) setLocalBinaryStatus({ 'llama-server': data.llamaServer, koboldcpp: data.koboldcpp });
+    }).catch(() => {});
+  }, []);
+
+  function installLocalProvider(binaryId) {
+    if (installingBinary?.provider === binaryId && !installingBinary?.done) return;
+    setInstallingBinary({ provider: binaryId, lines: [], done: false, error: false });
+    const es = new EventSource(`/api/providers/install-stream?provider=${encodeURIComponent(binaryId)}`);
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        setInstallingBinary((prev) => {
+          if (!prev || prev.provider !== binaryId) return prev;
+          const isDone = msg.type === 'done' || msg.type === 'error';
+          return { ...prev, lines: [...prev.lines, { type: msg.type, text: msg.message }], done: isDone, error: isDone && msg.type === 'error' };
+        });
+        if (msg.type === 'done') {
+          es.close();
+          api('/api/providers/local-status').then((data) => {
+            if (data) setLocalBinaryStatus({ 'llama-server': data.llamaServer, koboldcpp: data.koboldcpp });
+          }).catch(() => {});
+        }
+        if (msg.type === 'error') es.close();
+      } catch {}
+    };
+    es.onerror = () => {
+      setInstallingBinary((prev) => prev && !prev.done ? { ...prev, lines: [...prev.lines, { type: 'error', text: 'Connection lost' }], done: true, error: true } : prev);
+      es.close();
+    };
+  }
 
   useEffect(() => {
     if (selectedPromptProfileId === 'mirabilis-default' || isMirabilisDefaultPrompt(systemPrompt)) {
@@ -4397,37 +4432,54 @@ export default function ChatApp() {
 
                   {isProviderMenuOpen && (
                     <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-48 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
-                      {PROVIDER_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setProvider(opt.id);
-                            setIsProviderMenuOpen(false);
-                            setStatusText(`Provider: ${opt.label} (${opt.scope})`);
-                            // If the active model is a local GGUF file and we're switching to a
-                            // cloud-only provider, reset to 'auto' so it doesn't get sent to the API.
-                            const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'claude', 'gpuaas'];
-                            if (cloudOnlyProviders.includes(opt.id)) {
-                              setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
-                            }
-                            if (opt.id !== 'ollama' && !String(providerConfigs[opt.id]?.baseUrl || '').trim()) {
-                              setIsProviderConfigOpen(true);
-                            }
-                          }}
-                          className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                            provider === opt.id
-                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                              : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
-                          }`}
-                        >
-                          <span className="flex min-w-0 flex-col">
-                            <span className="truncate">{opt.label}</span>
-                            <span className="text-[10px] opacity-60">{opt.scope}</span>
-                          </span>
-                          {provider === opt.id ? <span className="text-[10px] opacity-70">active</span> : null}
-                        </button>
-                      ))}
+                      {PROVIDER_OPTIONS.map((opt) => {
+                        const binaryMissing = opt.requiresBinary && localBinaryStatus[opt.requiresBinary] === false;
+                        const isInstalling = installingBinary?.provider === opt.requiresBinary && !installingBinary?.done;
+                        return (
+                          <div key={opt.id} className="relative">
+                            <button
+                              type="button"
+                              disabled={binaryMissing}
+                              onClick={() => {
+                                if (binaryMissing) return;
+                                setProvider(opt.id);
+                                setIsProviderMenuOpen(false);
+                                setStatusText(`Provider: ${opt.label} (${opt.scope})`);
+                                const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'claude', 'gpuaas'];
+                                if (cloudOnlyProviders.includes(opt.id)) {
+                                  setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
+                                }
+                                if (opt.id !== 'ollama' && !String(providerConfigs[opt.id]?.baseUrl || '').trim()) {
+                                  setIsProviderConfigOpen(true);
+                                }
+                              }}
+                              className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                                binaryMissing
+                                  ? 'cursor-not-allowed opacity-40'
+                                  : provider === opt.id
+                                    ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                                    : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                              }`}
+                            >
+                              <span className="flex min-w-0 flex-col">
+                                <span className="truncate">{opt.label}</span>
+                                <span className="text-[10px] opacity-60">{binaryMissing ? 'Not installed' : opt.scope}</span>
+                              </span>
+                              {!binaryMissing && provider === opt.id ? <span className="text-[10px] opacity-70">active</span> : null}
+                            </button>
+                            {binaryMissing && (
+                              <button
+                                type="button"
+                                disabled={isInstalling}
+                                onClick={(e) => { e.stopPropagation(); installLocalProvider(opt.requiresBinary); setIsProviderMenuOpen(false); }}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
+                              >
+                                {isInstalling ? 'Installing…' : 'Install'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                       {provider !== 'ollama' && (
                         <button
                           type="button"
@@ -4444,6 +4496,28 @@ export default function ChatApp() {
                     </div>
                   )}
                 </div>
+
+                {/* Provider binary install progress panel */}
+                {installingBinary && (
+                  <div className="absolute bottom-12 left-0 z-30 w-72 rounded-xl border border-black/10 bg-white/95 p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                        Installing {installingBinary.provider}
+                      </span>
+                      {installingBinary.done && (
+                        <button type="button" onClick={() => setInstallingBinary(null)} className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+                      )}
+                    </div>
+                    <div className="max-h-32 overflow-y-auto space-y-0.5">
+                      {installingBinary.lines.map((line, i) => (
+                        <p key={i} className={`text-[11px] ${line.type === 'error' ? 'text-red-500' : line.type === 'done' ? 'text-green-500' : line.type === 'warn' ? 'text-yellow-500' : 'text-slate-600 dark:text-slate-300'}`}>
+                          {line.text}
+                        </p>
+                      ))}
+                      {!installingBinary.done && <p className="text-[11px] text-slate-400 animate-pulse">…</p>}
+                    </div>
+                  </div>
+                )}
 
                 {/* Provider config panel */}
                 {provider !== 'ollama' && isProviderConfigOpen && (
