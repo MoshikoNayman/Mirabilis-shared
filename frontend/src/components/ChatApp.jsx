@@ -4420,6 +4420,7 @@ export default function ChatApp() {
                       setIsContextPanelOpen(false);
                       setIsProviderMenuOpen((prev) => !prev);
                       setIsProviderConfigOpen(false);
+                      if (installingBinary?.done) setInstallingBinary(null);
                     }}
                     className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="Choose provider"
@@ -4433,7 +4434,7 @@ export default function ChatApp() {
                   {isProviderMenuOpen && (
                     <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-48 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
                       {PROVIDER_OPTIONS.map((opt) => {
-                        const binaryMissing = opt.requiresBinary && localBinaryStatus[opt.requiresBinary] === false;
+                        const binaryMissing = opt.requiresBinary && localBinaryStatus[opt.requiresBinary] !== true;
                         const isInstalling = installingBinary?.provider === opt.requiresBinary && !installingBinary?.done;
                         return (
                           <div key={opt.id} className="relative">
