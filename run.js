@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { Readable } = require('node:stream');
 
 const ROOT_DIR = __dirname;
@@ -275,6 +275,35 @@ function imagePythonPath() {
   const venvWin = path.join(IMAGE_SERVICE_DIR, '.venv', 'Scripts', 'python.exe');
   if (fs.existsSync(venvWin)) return venvWin;
   return path.join(IMAGE_SERVICE_DIR, '.venv', 'bin', 'python');
+}
+
+function missingImagePythonPackages() {
+  const py = imagePythonPath();
+  const moduleChecks = [
+    { module: 'flask', pkg: 'flask' }
+  ];
+
+  const missing = [];
+  for (const { module, pkg } of moduleChecks) {
+    const check = spawnSync(py, ['-c', `import ${module}`], {
+      cwd: IMAGE_SERVICE_DIR,
+      stdio: 'ignore'
+    });
+    if (check.status !== 0) missing.push(pkg);
+  }
+  return [...new Set(missing)];
+}
+
+async function ensureImageServicePythonDeps() {
+  const missing = missingImagePythonPackages();
+  if (missing.length === 0) return;
+
+  statusLine('INFO', `Installing missing image-service Python packages: ${missing.join(', ')}`);
+  const py = imagePythonPath();
+  const code = await runForeground(py, ['-m', 'pip', 'install', ...missing], IMAGE_SERVICE_DIR);
+  if (code !== 0) {
+    throw new Error('Failed installing image-service Python packages');
+  }
 }
 
 function resolveOllamaBin() {
@@ -1141,10 +1170,12 @@ async function main() {
   }
 
   // Check if deps exist, auto-install if missing
-  const depsExist = fs.existsSync(path.join(BACKEND_DIR, 'node_modules')) &&
-                    fs.existsSync(path.join(FRONTEND_DIR, 'node_modules')) &&
-                    (fs.existsSync(path.join(IMAGE_SERVICE_DIR, '.venv', 'bin', 'python')) ||
-                     fs.existsSync(path.join(IMAGE_SERVICE_DIR, '.venv', 'Scripts', 'python.exe')));
+  let depsExist = true;
+  try {
+    ensureDeps();
+  } catch {
+    depsExist = false;
+  }
 
   if (!depsExist) {
     statusLine('INFO', 'Dependencies missing. Running auto-install...');
@@ -1153,6 +1184,7 @@ async function main() {
 
   await withPhase('Preflight', async () => {
     ensureDeps();
+    await ensureImageServicePythonDeps();
     if (verbose) {
       statusLine('INFO', `Node: ${process.version}`);
       statusLine('INFO', `Threads: ${detectThreadCount()}`);
@@ -1246,8 +1278,10 @@ async function main() {
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
     const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860' };
+    const imageStartupTimeoutMs = Number(process.env.IMAGE_SERVICE_STARTUP_TIMEOUT_MS || 900000);
+    statusLine('INFO', `Waiting for image service readiness (timeout ${Math.round(imageStartupTimeoutMs / 1000)}s). First run may download model assets.`);
     managed.image = spawnLogged(imagePythonPath(), ['server.py'], IMAGE_SERVICE_DIR, imageEnv, path.join(os.tmpdir(), 'image-service.log'), false);
-    await waitForEndpoint('http://127.0.0.1:7860/health', 240000, 'Image service');
+    await waitForEndpoint('http://127.0.0.1:7860/health', imageStartupTimeoutMs, 'Image service');
     statusLine('OK', 'Image service: http://127.0.0.1:7860');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
   });
