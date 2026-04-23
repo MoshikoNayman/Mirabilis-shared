@@ -1316,12 +1316,23 @@ async function main() {
   if (provider === 'ui') {
     statusLine('INFO', 'Select provider from the UI settings panel.');
   }
-  statusLine('INFO', 'Press Ctrl+C to stop.');
-  process.stdout.write('\n');
-
   const activeManaged = [managed.backend, managed.frontend, managed.image].filter(Boolean);
   if (activeManaged.length === 0) {
-    await new Promise(() => {});
+    statusLine('INFO', 'All services were already running and were reused.');
+    statusLine('INFO', 'To stop services, run: node run.js stop');
+    if (process.platform === 'win32') {
+      statusLine('INFO', 'On Windows, this launcher exits after reuse, so Ctrl+C here will not stop reused services.');
+    }
+  } else {
+    statusLine('INFO', 'Press Ctrl+C to stop.');
+    if (process.platform === 'win32') {
+      statusLine('INFO', 'Windows tip: you can also stop all Mirabilis services with: node run.js stop');
+    }
+  }
+  process.stdout.write('\n');
+
+  if (activeManaged.length === 0) {
+    return;
   }
 
   await new Promise((resolve) => {
