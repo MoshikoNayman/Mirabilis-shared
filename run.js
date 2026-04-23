@@ -217,7 +217,14 @@ function commandExists(cmd) {
 }
 
 function npmCommand() {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  return process.platform === 'win32' ? 'cmd.exe' : 'npm';
+}
+
+function npmArgs(args) {
+  if (process.platform === 'win32') {
+    return ['/d', '/s', '/c', 'npm', ...args];
+  }
+  return args;
 }
 
 async function endpointReady(url) {
@@ -278,10 +285,16 @@ function resolveOllamaBin() {
   return 'ollama';
 }
 
+async function hasOllamaCommand() {
+  const ollamaBin = resolveOllamaBin();
+  if (ollamaBin !== 'ollama') return true;
+  return commandExists('ollama');
+}
+
 async function ensureOllamaReady() {
   if (await endpointReady('http://127.0.0.1:11434/api/tags')) return true;
   const ollamaBin = resolveOllamaBin();
-  if (ollamaBin === 'ollama' && !(await commandExists('ollama'))) return false;
+  if (!(await hasOllamaCommand())) return false;
 
   process.stdout.write('Starting Ollama service...\n');
   const out = fs.openSync(path.join(os.tmpdir(), 'ollama.log'), 'a');
@@ -296,7 +309,8 @@ async function ensureOllamaReady() {
 }
 
 async function ensureOllamaModel() {
-  if (!(await commandExists('ollama'))) return false;
+  const ollamaBin = resolveOllamaBin();
+  if (!(await hasOllamaCommand())) return false;
   try {
     const res = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(4000) });
     const body = await res.json();
@@ -310,7 +324,7 @@ async function ensureOllamaModel() {
   }
 
   statusLine('INFO', 'No Ollama models found — pulling qwen2.5:0.5b (one-time, ~400MB)...');
-  const code = await runForeground('ollama', ['pull', 'qwen2.5:0.5b'], ROOT_DIR);
+  const code = await runForeground(ollamaBin, ['pull', 'qwen2.5:0.5b'], ROOT_DIR);
   if (code === 0) statusLine('OK', 'Ollama default model ready');
   return code === 0;
 }
@@ -459,7 +473,8 @@ function runCaptured(command, args, cwd) {
 }
 
 async function getInstalledOllamaModels() {
-  const { code, stdout } = await runCaptured('ollama', ['list'], ROOT_DIR);
+  const ollamaBin = resolveOllamaBin();
+  const { code, stdout } = await runCaptured(ollamaBin, ['list'], ROOT_DIR);
   if (code !== 0) return new Set();
 
   const models = new Set();
@@ -527,7 +542,7 @@ async function runInstall() {
   statusLine('OK', `Node.js: ${require('child_process').execSync('node -v', { encoding: 'utf8' }).trim()}`);
 
   // Check Ollama — auto-install if missing
-  if (!(await commandExists('ollama'))) {
+  if (!(await hasOllamaCommand())) {
     await installOllama();
   }
   statusLine('OK', 'Ollama: installed');
@@ -538,7 +553,8 @@ async function runInstall() {
     statusLine('INFO', 'Starting Ollama service...');
     const ollamaLog = path.join(os.tmpdir(), 'ollama-install.log');
     const ollamaOut = fs.openSync(ollamaLog, 'a');
-    const ollamaProc = spawn('ollama', ['serve'], { stdio: ['ignore', ollamaOut, ollamaOut], detached: true });
+    const ollamaBin = resolveOllamaBin();
+    const ollamaProc = spawn(ollamaBin, ['serve'], { stdio: ['ignore', ollamaOut, ollamaOut], detached: true });
     ollamaProc.unref();
     // Wait up to 10s for it to become ready
     for (let i = 0; i < 10; i++) {
@@ -552,14 +568,14 @@ async function runInstall() {
 
   // Install backend
   statusLine('INFO', 'Installing backend dependencies...');
-  const backendCode = await runForeground(npmCommand(), ['install', '--legacy-peer-deps'], BACKEND_DIR);
+  const backendCode = await runForeground(npmCommand(), npmArgs(['install', '--legacy-peer-deps']), BACKEND_DIR);
   if (backendCode !== 0) {
     throw new Error('Backend npm install failed');
   }
 
   // Install frontend
   statusLine('INFO', 'Installing frontend dependencies...');
-  const frontendCode = await runForeground(npmCommand(), ['install', '--legacy-peer-deps'], FRONTEND_DIR);
+  const frontendCode = await runForeground(npmCommand(), npmArgs(['install', '--legacy-peer-deps']), FRONTEND_DIR);
   if (frontendCode !== 0) {
     throw new Error('Frontend npm install failed');
   }
@@ -893,15 +909,16 @@ async function runUninstall() {
 
       try {
         // Remove Ollama models
-        if (await commandExists('ollama')) {
+        if (await hasOllamaCommand()) {
           statusLine('INFO', 'Removing Ollama models...');
+          const ollamaBin = resolveOllamaBin();
           const installedModels = await getInstalledOllamaModels();
           const removableModels = MIRABILIS_MANAGED_OLLAMA_MODELS.filter((model) => installedModels.has(model));
           if (removableModels.length === 0) {
             statusLine('INFO', 'No Mirabilis-managed Ollama models found.');
           }
           for (const model of removableModels) {
-            const rmCode = await runForeground('ollama', ['rm', model], ROOT_DIR);
+            const rmCode = await runForeground(ollamaBin, ['rm', model], ROOT_DIR);
             if (rmCode === 0) {
               statusLine('OK', `Removed Ollama model: ${model}`);
             }
@@ -983,8 +1000,9 @@ async function runDoctor() {
   add('llama-server binary', fs.existsSync(llamaBin), llamaBin);
   add('koboldcpp binary', fs.existsSync(koboldBin), koboldBin);
 
-  const hasOllama = await commandExists('ollama');
-  add('ollama command in PATH', hasOllama, hasOllama ? 'available' : 'not found');
+  const hasOllama = await hasOllamaCommand();
+  const ollamaBin = resolveOllamaBin();
+  add('ollama command', hasOllama, hasOllama ? `available (${ollamaBin})` : 'not found');
   add('ollama endpoint', await endpointReady('http://127.0.0.1:11434/api/tags'), 'http://127.0.0.1:11434/api/tags');
 
   add('backend endpoint', await endpointReady('http://127.0.0.1:4000/health'), 'http://127.0.0.1:4000/health');
@@ -1217,12 +1235,12 @@ async function main() {
 
   await withPhase('Services', async () => {
     const backendLogFile = path.join(os.tmpdir(), 'backend.log');
-    managed.backend = spawnLogged(npmCommand(), ['run', 'dev'], BACKEND_DIR, env, backendLogFile, logEnabled);
+    managed.backend = spawnLogged(npmCommand(), npmArgs(['run', 'dev']), BACKEND_DIR, env, backendLogFile, logEnabled);
     await waitForEndpoint('http://127.0.0.1:4000/health', 45000, 'Backend', managed.backend, backendLogFile);
     statusLine('OK', 'Backend: http://127.0.0.1:4000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
-    managed.frontend = spawnLogged(npmCommand(), ['run', 'dev'], FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
+    managed.frontend = spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
     await waitForEndpoint('http://127.0.0.1:3000', 60000, 'Frontend');
     statusLine('OK', 'Frontend: http://127.0.0.1:3000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
