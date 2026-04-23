@@ -270,13 +270,22 @@ function imagePythonPath() {
   return path.join(IMAGE_SERVICE_DIR, '.venv', 'bin', 'python');
 }
 
+function resolveOllamaBin() {
+  if (process.platform === 'win32') {
+    const candidate = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe');
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return 'ollama';
+}
+
 async function ensureOllamaReady() {
   if (await endpointReady('http://127.0.0.1:11434/api/tags')) return true;
-  if (!(await commandExists('ollama'))) return false;
+  const ollamaBin = resolveOllamaBin();
+  if (ollamaBin === 'ollama' && !(await commandExists('ollama'))) return false;
 
   process.stdout.write('Starting Ollama service...\n');
   const out = fs.openSync(path.join(os.tmpdir(), 'ollama.log'), 'a');
-  managed.ollama = spawn('ollama', ['serve'], { stdio: ['ignore', out, out] });
+  managed.ollama = spawn(ollamaBin, ['serve'], { stdio: ['ignore', out, out] });
   ollamaStartedByScript = true;
 
   for (let i = 0; i < 20; i += 1) {
@@ -495,6 +504,14 @@ async function installOllama() {
       );
     }
     statusLine('OK', 'Ollama installed via PowerShell installer');
+    // The installer adds Ollama to PATH but only for new processes.
+    // Inject the known install directory into the current process PATH so
+    // subsequent commandExists() and spawn() calls find ollama.exe immediately.
+    const ollamaInstallDir = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Ollama');
+    if (fs.existsSync(ollamaInstallDir)) {
+      process.env.PATH = `${ollamaInstallDir}${path.delimiter}${process.env.PATH}`;
+      statusLine('INFO', `Added Ollama to PATH: ${ollamaInstallDir}`);
+    }
   } else {
     throw new Error('Ollama not installed.\nDownload and install from: https://ollama.com/download\nThen rerun: node run.js');
   }
