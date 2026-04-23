@@ -3,7 +3,7 @@
 **Version:** 26.3R1-S26  
 **Author:** Moshiko Nayman
 
-Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API—your choice, per conversation.
+Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API-your choice, per conversation.
 
 ---
 
@@ -15,7 +15,7 @@ node run.js
 
 Open: **http://localhost:3000**
 
-`node run.js` starts the backend, frontend, image service, and any configured local providers. **Dependencies are installed automatically on first run** — no separate install step needed. No shell scripts required.
+`node run.js` starts the backend, frontend, image service, and any configured local providers. **Dependencies are installed automatically on first run** - no separate install step needed. No shell scripts required.
 
 > To install or reinstall dependencies explicitly: `node run.js install`
 
@@ -52,18 +52,18 @@ All remote providers require an API key. Configure in the **Configure endpoint**
 ### Provider UX
 
 - Dropdown shows **Local** / **Remote** scope under each provider name.
-- Local providers that require a binary (`llama-server`, `KoboldCpp`) are **greyed out** when not installed — click **Install** inline to download and install automatically, or **Uninstall** to remove.
+- Local providers that require a binary (`llama-server`, `KoboldCpp`) are **greyed out** when not installed - click **Install** inline to download and install automatically, or **Uninstall** to remove.
 - Per-provider hint banner in the config panel shows the expected base URL and key format.
-- **Estimated monthly budget bar** — set a USD budget; the bar tracks estimated token spend against it (shown for all remote providers).
-- **Auto model resolution** — selecting `auto` picks a sensible default model per provider (e.g. `gpt-4o-mini` for OpenAI, `llama-3.1-8b-instant` for Groq, `openai/gpt-4o-mini` for OpenRouter).
-- **Stream stall watchdog** — aborts a stalled local stream after 120 s with a clear timeout message.
+- **Estimated monthly budget bar** - set a USD budget; the bar tracks estimated token spend against it (shown for all remote providers).
+- **Auto model resolution** - selecting `auto` picks a sensible default model per provider (e.g. `gpt-4o-mini` for OpenAI, `llama-3.1-8b-instant` for Groq, `openai/gpt-4o-mini` for OpenRouter).
+- **Stream stall watchdog** - aborts a stalled local stream after 120 s with a clear timeout message.
 - No forced fallback: if a remote provider is unreachable, an error is shown rather than silently switching to Ollama.
 
 ---
 
 ## Commands
 
-All operations run pure JavaScript — no shell scripts required.
+All operations run pure JavaScript - no shell scripts required.
 
 ```
 node run.js                        # Start (UI provider selection)
@@ -126,7 +126,7 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **Voice / TTS** | Text-to-speech with Piper neural voices; download models from the UI |
 | **Voice / TTS** | Browser speech synthesis fallback; rate and pitch controls |
 | **Web Search** | Automatic web search classification; enriches answers with live results |
-| **Remote Execution** | SSH or local remote control — run commands and read files from the UI |
+| **Remote Execution** | SSH or local remote control - run commands and read files from the UI |
 | **System Monitor** | Live CPU/RAM utilization, hardware profile, system specs |
 | **Training / Memory** | Personal memory store, fine-tuning examples, dataset export |
 | **MCP Client** | Connect to external MCP servers with per-server tool approval policy |
@@ -165,8 +165,8 @@ POST http://127.0.0.1:4000/mcp
 | `system_info` | OS, platform, architecture, hostname, home dir, cwd |
 | `list_dir` | List files and directories at a path |
 | `read_file` | Read a file's text content (≤ 512 KB) |
-| `write_file` | Write/overwrite a file — requires `confirmed: true` |
-| `run_command` | Run a shell command (macOS/Linux/Windows) — requires `confirmed: true` |
+| `write_file` | Write/overwrite a file - requires `confirmed: true` |
+| `run_command` | Run a shell command (macOS/Linux/Windows) - requires `confirmed: true` |
 
 ### Connect from VS Code
 
@@ -177,7 +177,7 @@ Add to `.vscode/mcp.json`:
   "servers": {
     "mirabilis": {
       "url": "http://127.0.0.1:4000/mcp",
-      "description": "Mirabilis local AI — start with node run.js first"
+      "description": "Mirabilis local AI - start with node run.js first"
     }
   }
 }
@@ -214,11 +214,11 @@ Mirabilis can connect **to** external MCP servers (Junos, Synology, Debian, etc.
 
 Mirabilis is 100% pure JavaScript for all launcher and lifecycle operations:
 
-- **Installation** — automatic on first run; or explicitly via `node run.js install`: validates prerequisites, installs npm/Python deps, downloads provider binaries.
-- **Startup** — `node run.js [provider]`: orchestrates backend (Express, port 4000), frontend (Next.js, port 3000), image-service (port 7860), and local AI providers.
-- **Lifecycle** — `stop`, `restart`, `doctor`, `logs`, `uninstall`: all pure JS, no shell scripts.
-- **Self-healing** — auto-installs missing dependencies on startup; auto-creates missing provider adapter files.
-- **No shell dependencies** — works cross-platform without any `.sh` wrappers.
+- **Installation** - automatic on first run; or explicitly via `node run.js install`: validates prerequisites, installs npm/Python deps, downloads provider binaries.
+- **Startup** - `node run.js [provider]`: orchestrates backend (Express, port 4000), frontend (Next.js, port 3000), image-service (port 7860), and local AI providers.
+- **Lifecycle** - `stop`, `restart`, `doctor`, `logs`, `uninstall`: all pure JS, no shell scripts.
+- **Self-healing** - auto-installs missing dependencies on startup; auto-creates missing provider adapter files.
+- **No shell dependencies** - works cross-platform without any `.sh` wrappers.
 
 ```text
 frontend/       Next.js UI (React, Tailwind)
@@ -229,8 +229,8 @@ backend/        Express API + provider adapters
     server.js
 image-service/  Local Stable Diffusion image generation
 providers/      Local runtime binaries (llama-server, koboldcpp)
-training/msq/   MSQ model family — Modelfiles and setup script
-config/         default.json — port, model, and path configuration
+training/msq/   MSQ model family - Modelfiles and setup script
+config/         default.json - port, model, and path configuration
 run.js          Unified launcher, installer, doctor, logs, and cleanup
 ```
 
