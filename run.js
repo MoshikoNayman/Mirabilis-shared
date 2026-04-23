@@ -1325,9 +1325,7 @@ async function main() {
     }
   } else {
     statusLine('INFO', 'Press Ctrl+C to stop.');
-    if (process.platform === 'win32') {
-      statusLine('INFO', 'Windows tip: you can also stop all Mirabilis services with: node run.js stop');
-    }
+    statusLine('INFO', 'Tip: you can also stop all Mirabilis services with: node run.js stop');
   }
   process.stdout.write('\n');
 
