@@ -23,6 +23,82 @@ function isMirabilisDefaultPrompt(value) {
     text === 'You are a concise and helpful local assistant.';
 }
 
+const UNSAVED_PROMPT_PROFILE_ID = 'current-custom';
+
+const BUILTIN_PROMPT_PROFILES = [
+  {
+    id: 'mirabilis-default',
+    label: 'Default',
+    description: 'Balanced general assistant',
+    getPrompt: (providerId) => buildDefaultSystemPrompt(providerId)
+  },
+  {
+    id: 'network-engineer',
+    label: 'Network',
+    description: 'Operational troubleshooting and change review',
+    getPrompt: () => 'You are Mirabilis AI acting as a senior network engineer. Be precise, operationally conservative, and explicit about assumptions. When analyzing configs, logs, or CLI output, prioritize root cause, blast radius, rollback considerations, and concrete next commands.'
+  },
+  {
+    id: 'research-analyst',
+    label: 'Analyst',
+    description: 'Structured research and synthesis',
+    getPrompt: () => 'You are Mirabilis AI acting as a research analyst. Structure answers clearly, distinguish facts from inference, call out uncertainty, and synthesize findings into concise conclusions with practical implications.'
+  },
+  {
+    id: 'guided-tutor',
+    label: 'Tutor',
+    description: 'Teach step by step without hand-waving',
+    getPrompt: () => 'You are Mirabilis AI acting as a guided tutor. Teach in clear steps, adapt to the user\'s apparent level, and explain why each step matters. Prefer examples and checkpoints over long monologues.'
+  },
+  {
+    id: 'remote-operator',
+    label: 'Operator',
+    description: 'Action plans for MCP and remote control',
+    getPrompt: () => 'You are Mirabilis AI acting as a remote operations assistant. Before suggesting commands or tool use, think in terms of verification, safe sequencing, explicit targets, and reversible actions. Prefer short plans with command-by-command intent.'
+  }
+];
+
+function normalizePromptProfileId(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed.slice(0, 80) : '';
+}
+
+function sanitizeCustomPromptProfiles(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => ({
+      id: normalizePromptProfileId(item?.id),
+      label: String(item?.label || '').trim().slice(0, 60),
+      description: String(item?.description || '').trim().slice(0, 120),
+      prompt: String(item?.prompt || '').slice(0, 16000)
+    }))
+    .filter((item) => item.id && item.label && item.prompt)
+    .slice(0, 24);
+}
+
+function buildPromptProfiles(providerId, customProfiles = []) {
+  return [
+    ...BUILTIN_PROMPT_PROFILES.map((profile) => ({
+      id: profile.id,
+      label: profile.label,
+      description: profile.description,
+      content: profile.getPrompt(providerId),
+      isBuiltin: true
+    })),
+    ...sanitizeCustomPromptProfiles(customProfiles).map((profile) => ({
+      id: profile.id,
+      label: profile.label,
+      description: profile.description,
+      content: profile.prompt,
+      isBuiltin: false
+    }))
+  ];
+}
+
+function findPromptProfile(profiles, profileId) {
+  return profiles.find((profile) => profile.id === profileId) || null;
+}
+
 function formatUsdEstimate(value) {
   const amount = Number(value || 0);
   if (amount <= 0) return '$0.00';
@@ -598,7 +674,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
 
 // Memoised sidebar chat row — comparator ignores callbacks so typing / streaming
 // never causes the full chat list to reconcile; only the affected item re-renders.
-const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, onSelect, onToggleMenu, onDelete, onRename, onExport, onTogglePin }) {
+const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, onSelect, onToggleMenu, onDelete, onRename, onExport, onTogglePin, onBranch }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
 
@@ -650,7 +726,11 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
         ) : (
           <button onClick={() => onSelect(chat.id)} className="min-w-0 flex-1 text-left">
             <div className="line-clamp-1 text-sm font-medium">{chat.title}</div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-300">{formatTime(chat.updatedAt)}</div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-slate-300">
+              <span>{formatTime(chat.updatedAt)}</span>
+              {chat.parentChatId ? <span className="rounded-full border border-black/10 px-1.5 py-0 dark:border-white/10">branch</span> : null}
+              {chat.snapshotCount > 0 ? <span className="rounded-full border border-black/10 px-1.5 py-0 dark:border-white/10">{chat.snapshotCount} snap</span> : null}
+            </div>
           </button>
         )}
         {!isRenaming && (
@@ -680,6 +760,21 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
               <span>Rename</span>
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              onClick={() => { onBranch(chat.id); onToggleMenu(null); }}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 3v12" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="18" cy="18" r="3" />
+                <path d="M9 6h6" />
+                <path d="M9 18h6" />
+                <path d="M6 12c0 3.314 2.686 6 6 6" />
+              </svg>
+              <span>Branch Chat</span>
             </button>
             <button
               type="button"
@@ -923,6 +1018,8 @@ export default function ChatApp() {
   const shortcutRef = useRef({});
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
+  const [activeChatMeta, setActiveChatMeta] = useState(null);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('');
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -966,6 +1063,20 @@ export default function ChatApp() {
     };
   });
   const [isProviderConfigOpen, setIsProviderConfigOpen] = useState(false);
+  const [customPromptProfiles, setCustomPromptProfiles] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return sanitizeCustomPromptProfiles(JSON.parse(window.localStorage.getItem('mirabilis-custom-prompt-profiles') || '[]'));
+      } catch {}
+    }
+    return [];
+  });
+  const [selectedPromptProfileId, setSelectedPromptProfileId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.localStorage.getItem('mirabilis-prompt-profile-id') || 'mirabilis-default';
+    }
+    return 'mirabilis-default';
+  });
   const [model, setModel] = useState(() => {
     if (typeof window !== 'undefined') return window.localStorage.getItem('local-ai-model') || 'auto';
     return 'auto';
@@ -1131,6 +1242,23 @@ export default function ChatApp() {
   const [mcpCallResultText, setMcpCallResultText] = useState('');
   const [mcpLoading, setMcpLoading] = useState(false);
   const [mcpCalling, setMcpCalling] = useState(false);
+  const promptAutosaveTimerRef = useRef(null);
+
+  const promptProfiles = useMemo(
+    () => buildPromptProfiles(provider, customPromptProfiles),
+    [provider, customPromptProfiles]
+  );
+
+  const promptProfileOptions = useMemo(() => {
+    const hasSelected = promptProfiles.some((profile) => profile.id === selectedPromptProfileId);
+    if (hasSelected && selectedPromptProfileId !== UNSAVED_PROMPT_PROFILE_ID) return promptProfiles;
+    return [...promptProfiles, { id: UNSAVED_PROMPT_PROFILE_ID, label: 'Current Custom', description: 'Unsaved instructions', content: systemPrompt, isBuiltin: false }];
+  }, [promptProfiles, selectedPromptProfileId, systemPrompt]);
+
+  const selectedPromptProfile = useMemo(
+    () => findPromptProfile(promptProfiles, selectedPromptProfileId),
+    [promptProfiles, selectedPromptProfileId]
+  );
 
   const selectedMcpServer = useMemo(
     () => mcpServers.find((item) => item.id === mcpSelectedServerId) || null,
@@ -1147,6 +1275,7 @@ export default function ChatApp() {
     const savedThemeMode = window.localStorage.getItem('local-ai-theme-mode');
     const savedModel = window.localStorage.getItem('local-ai-model');
     const savedPrompt = window.localStorage.getItem('local-ai-system-prompt');
+    const savedPromptProfileId = window.localStorage.getItem('mirabilis-prompt-profile-id') || 'mirabilis-default';
     const savedDeepWeb = window.localStorage.getItem('local-ai-deep-web-enabled');
     const savedCanvasEnabled = window.localStorage.getItem('local-ai-canvas-enabled');
     const savedCanvasText = window.localStorage.getItem('local-ai-canvas-text');
@@ -1163,6 +1292,7 @@ export default function ChatApp() {
     if (savedModel) {
       setModel(savedModel);
     }
+    setSelectedPromptProfileId(savedPromptProfileId);
     // deepWebEnabled already restored via lazy useState initialiser above
     if (savedCanvasEnabled === 'true') {
       setCanvasEnabled(true);
@@ -1182,7 +1312,7 @@ export default function ChatApp() {
     if (savedPersonalMemory === 'false') {
       setUsePersonalMemory(false);
     }
-    if (isMirabilisDefaultPrompt(savedPrompt)) {
+    if (isMirabilisDefaultPrompt(savedPrompt) || savedPromptProfileId === 'mirabilis-default') {
       setSystemPrompt(buildDefaultSystemPrompt(provider));
     } else if (savedPrompt) {
       setSystemPrompt(savedPrompt);
@@ -1190,8 +1320,10 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
-    setSystemPrompt((current) => (isMirabilisDefaultPrompt(current) ? buildDefaultSystemPrompt(provider) : current));
-  }, [provider]);
+    if (selectedPromptProfileId === 'mirabilis-default' || isMirabilisDefaultPrompt(systemPrompt)) {
+      setSystemPrompt(buildDefaultSystemPrompt(provider));
+    }
+  }, [provider, selectedPromptProfileId]);
 
   useEffect(() => {
     const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
@@ -1580,6 +1712,36 @@ export default function ChatApp() {
   }, [systemPrompt]);
 
   useEffect(() => {
+    window.localStorage.setItem('mirabilis-prompt-profile-id', selectedPromptProfileId || UNSAVED_PROMPT_PROFILE_ID);
+  }, [selectedPromptProfileId]);
+
+  useEffect(() => {
+    window.localStorage.setItem('mirabilis-custom-prompt-profiles', JSON.stringify(customPromptProfiles));
+  }, [customPromptProfiles]);
+
+  useEffect(() => {
+    if (!activeChatId) return undefined;
+    if (promptAutosaveTimerRef.current) {
+      clearTimeout(promptAutosaveTimerRef.current);
+    }
+    promptAutosaveTimerRef.current = setTimeout(() => {
+      api(`/api/chats/${activeChatId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          systemPrompt,
+          promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+        })
+      }).catch(() => {});
+    }, 350);
+
+    return () => {
+      if (promptAutosaveTimerRef.current) {
+        clearTimeout(promptAutosaveTimerRef.current);
+      }
+    };
+  }, [activeChatId, systemPrompt, selectedPromptProfileId]);
+
+  useEffect(() => {
     window.localStorage.setItem('local-ai-deep-web-enabled', String(deepWebEnabled));
     if (!deepWebEnabled) setWebSearchStatus('idle');
   }, [deepWebEnabled]);
@@ -1923,7 +2085,12 @@ export default function ChatApp() {
       if (!chatId) {
         const payload = await api('/api/chats', {
           method: 'POST',
-          body: JSON.stringify({ title: 'New Chat', uncensoredMode })
+          body: JSON.stringify({
+            title: 'New Chat',
+            uncensoredMode,
+            systemPrompt,
+            promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+          })
         });
         chatId = payload.chat.id;
         setActiveChatId(chatId);
@@ -2082,8 +2249,19 @@ export default function ChatApp() {
     }
     const payload = await api(`/api/chats/${chatId}`);
     setActiveChatId(chatId);
+    setActiveChatMeta(payload.chat || null);
+    const snapshots = Array.isArray(payload.chat?.snapshots) ? payload.chat.snapshots : [];
+    setSelectedSnapshotId(snapshots[snapshots.length - 1]?.id || '');
     setMessages(payload.chat?.messages || []);
     setUncensoredMode(payload.chat?.uncensoredMode === true);
+    const nextPromptProfileId = normalizePromptProfileId(payload.chat?.promptProfileId) || 'mirabilis-default';
+    setSelectedPromptProfileId(nextPromptProfileId);
+    if (payload.chat && Object.prototype.hasOwnProperty.call(payload.chat, 'systemPrompt')) {
+      setSystemPrompt(typeof payload.chat.systemPrompt === 'string' ? payload.chat.systemPrompt : '');
+    } else {
+      const matchingProfile = findPromptProfile(promptProfiles, nextPromptProfileId);
+      setSystemPrompt(matchingProfile?.content || buildDefaultSystemPrompt(provider));
+    }
     // Restore saved scroll, or jump to bottom for new chats
     requestAnimationFrame(() => {
       if (!messagesScrollRef.current) return;
@@ -2099,7 +2277,12 @@ export default function ChatApp() {
   async function createChat() {
     const payload = await api('/api/chats', {
       method: 'POST',
-      body: JSON.stringify({ title: 'New Chat', uncensoredMode })
+      body: JSON.stringify({
+        title: 'New Chat',
+        uncensoredMode,
+        systemPrompt,
+        promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+      })
     });
     setChatSearch('');
     await refreshChats();
@@ -2145,6 +2328,7 @@ export default function ChatApp() {
     if (next) {
       setUncensoredMode(true);
       setUsePersonalMemory(false);
+      setSelectedPromptProfileId(UNSAVED_PROMPT_PROFILE_ID);
       setSystemPrompt('');
 
       if (!activeChatId) {
@@ -2168,6 +2352,7 @@ export default function ChatApp() {
 
     setUsePersonalMemory(true);
     if (!systemPrompt.trim()) {
+      setSelectedPromptProfileId('mirabilis-default');
       setSystemPrompt(buildDefaultSystemPrompt(provider));
     }
 
@@ -2197,6 +2382,8 @@ export default function ChatApp() {
     setOpenChatMenuId((current) => (current === chatId ? null : current));
     if (activeChatId === chatId) {
       setActiveChatId(null);
+      setActiveChatMeta(null);
+      setSelectedSnapshotId('');
       setMessages([]);
     }
     await refreshChats();
@@ -2209,6 +2396,8 @@ export default function ChatApp() {
     chatListEpochRef.current++; // invalidate any in-flight refreshChats() calls
     // Clear UI immediately — don't wait for the network roundtrip
     setActiveChatId(null);
+    setActiveChatMeta(null);
+    setSelectedSnapshotId('');
     setMessages([]);
     setChats([]);
     setChatSearch('');
@@ -2253,6 +2442,115 @@ export default function ChatApp() {
       else next.add(chatId);
       return next;
     });
+  }
+
+  async function branchChat(chatId = activeChatId) {
+    const targetChatId = chatId || activeChatId;
+    if (!targetChatId) return;
+    try {
+      const payload = await api(`/api/chats/${targetChatId}/branch`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      await refreshChats();
+      await loadChat(payload.chat.id);
+      setStatusText('Created chat branch');
+    } catch (error) {
+      setStatusText(`Branch failed: ${error.message}`);
+    }
+  }
+
+  async function saveSnapshot() {
+    if (!activeChatId) {
+      setStatusText('Open a chat before saving a snapshot');
+      return;
+    }
+    try {
+      const payload = await api(`/api/chats/${activeChatId}/snapshots`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      setActiveChatMeta(payload.chat || null);
+      setSelectedSnapshotId(payload.snapshot?.id || '');
+      await refreshChats();
+      setStatusText('Snapshot saved');
+    } catch (error) {
+      setStatusText(`Snapshot failed: ${error.message}`);
+    }
+  }
+
+  async function restoreSnapshot() {
+    if (!activeChatId || !selectedSnapshotId) {
+      setStatusText('Select a snapshot to restore');
+      return;
+    }
+    const confirmed = window.confirm('Restore this snapshot? Current chat state will be replaced.');
+    if (!confirmed) return;
+    try {
+      await api(`/api/chats/${activeChatId}/snapshots/${selectedSnapshotId}/restore`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      await refreshChats();
+      await loadChat(activeChatId);
+      setStatusText('Snapshot restored');
+    } catch (error) {
+      setStatusText(`Restore failed: ${error.message}`);
+    }
+  }
+
+  function handleSystemPromptChange(value) {
+    setSystemPrompt(value);
+    if (selectedPromptProfile && value === selectedPromptProfile.content) {
+      return;
+    }
+    setSelectedPromptProfileId(UNSAVED_PROMPT_PROFILE_ID);
+  }
+
+  function applyPromptProfile(profileId) {
+    if (profileId === UNSAVED_PROMPT_PROFILE_ID) {
+      setSelectedPromptProfileId(UNSAVED_PROMPT_PROFILE_ID);
+      return;
+    }
+    const profile = findPromptProfile(promptProfiles, profileId);
+    if (!profile) return;
+    setSelectedPromptProfileId(profile.id);
+    setSystemPrompt(profile.content);
+    setStatusText(`Loaded instruction profile: ${profile.label}`);
+  }
+
+  function saveCurrentPromptProfile() {
+    const prompt = systemPrompt.trim();
+    if (!prompt) {
+      setStatusText('Cannot save an empty instruction profile');
+      return;
+    }
+    const name = window.prompt('Profile name');
+    if (!name) return;
+    const label = name.trim().slice(0, 60);
+    if (!label) return;
+    const description = window.prompt('Short description (optional)') || '';
+    const slugBase = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'profile';
+    const id = `custom-${slugBase}-${Date.now().toString(36)}`;
+    const nextProfile = {
+      id,
+      label,
+      description: description.trim().slice(0, 120),
+      prompt
+    };
+    setCustomPromptProfiles((prev) => [...prev, nextProfile]);
+    setSelectedPromptProfileId(id);
+    setStatusText(`Saved instruction profile: ${label}`);
+  }
+
+  function deleteSelectedPromptProfile() {
+    const selected = findPromptProfile(promptProfiles, selectedPromptProfileId);
+    if (!selected || selected.isBuiltin) return;
+    const confirmed = window.confirm(`Delete instruction profile "${selected.label}"?`);
+    if (!confirmed) return;
+    setCustomPromptProfiles((prev) => prev.filter((profile) => profile.id !== selected.id));
+    setSelectedPromptProfileId(UNSAVED_PROMPT_PROFILE_ID);
+    setStatusText(`Deleted instruction profile: ${selected.label}`);
   }
 
   async function exportChat(chatId) {
@@ -2901,7 +3199,12 @@ export default function ChatApp() {
     if (!chatId) {
       const payload = await api('/api/chats', {
         method: 'POST',
-        body: JSON.stringify({ title: content.slice(0, 40), uncensoredMode })
+        body: JSON.stringify({
+          title: content.slice(0, 40),
+          uncensoredMode,
+          systemPrompt,
+          promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+        })
       });
       chatId = payload.chat.id;
       setActiveChatId(chatId);
@@ -3127,7 +3430,12 @@ export default function ChatApp() {
     if (!chatId) {
       const payload = await api('/api/chats', {
         method: 'POST',
-        body: JSON.stringify({ title: 'New Chat', uncensoredMode })
+        body: JSON.stringify({
+          title: 'New Chat',
+          uncensoredMode,
+          systemPrompt,
+          promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+        })
       });
       chatId = payload.chat.id;
       setActiveChatId(chatId);
@@ -3409,16 +3717,77 @@ export default function ChatApp() {
           </div>
 
           {isSystemPromptVisible && (
-          <div className="space-y-2">
-            <label className="block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-300">
-              Instructions
-            </label>
-            <textarea
-              value={systemPrompt}
-              onChange={(event) => setSystemPrompt(event.target.value)}
-              rows={3}
-              className="w-full rounded-lg border border-black/10 bg-white/80 px-2 py-2 text-xs dark:border-white/20 dark:bg-slate-800"
-            />
+          <div className="rounded-2xl border border-black/10 bg-white/70 p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.25)] dark:border-white/10 dark:bg-slate-900/45">
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
+                  Assistant
+                </div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                  {selectedPromptProfile?.description || (selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? 'Custom for this chat' : 'Preset active')}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accentSoft/80 px-3 text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:border-accent/30 dark:bg-accent/15 dark:text-accent">
+                    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 shrink-0 opacity-80" fill="currentColor" aria-hidden="true">
+                      <path d="M10 2l1.8 4.7L16.5 8l-4.7 1.3L10 14l-1.8-4.7L3.5 8l4.7-1.3L10 2z" />
+                    </svg>
+                    <select
+                      value={selectedPromptProfileId}
+                      onChange={(event) => applyPromptProfile(event.target.value)}
+                      className="min-w-0 flex-1 bg-transparent py-2 text-[12px] font-semibold outline-none"
+                    >
+                      {promptProfileOptions.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  onClick={saveCurrentPromptProfile}
+                  className="shrink-0 rounded-xl bg-accent px-3 py-2 text-[11px] font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
+                >
+                  Save
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+                <span className="truncate">{selectedPromptProfile?.label || 'Current custom prompt'}</span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSystemPrompt((selectedPromptProfile?.content || buildDefaultSystemPrompt(provider)))}
+                    className="rounded-lg border border-black/10 bg-white/85 px-2 py-1 text-[10px] font-semibold text-slate-600 transition hover:bg-black/5 hover:text-slate-700 dark:border-white/15 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-slate-100"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteSelectedPromptProfile}
+                    disabled={!selectedPromptProfile || selectedPromptProfile.isBuiltin}
+                    className="rounded-lg border border-red-400/35 bg-white/85 px-2 py-1 text-[10px] font-semibold text-red-600 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400/25 dark:bg-slate-800 dark:text-red-300 dark:hover:bg-red-950/30 dark:hover:text-red-200"
+                  >
+                    Delete
+                  </button>
+                  <span>{systemPrompt.trim().length.toLocaleString()} chars</span>
+                </div>
+              </div>
+
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-300">
+                Prompt
+              </div>
+              <textarea
+                value={systemPrompt}
+                onChange={(event) => handleSystemPromptChange(event.target.value)}
+                rows={4}
+                className="w-full rounded-xl border border-black/10 bg-white/95 px-3 py-2.5 text-[12px] leading-relaxed text-slate-700 outline-none transition focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-100"
+              />
+            </div>
           </div>
           )}
 
@@ -3444,6 +3813,7 @@ export default function ChatApp() {
                   isPinned={pinnedChatIds.has(chat.id)}
                   onSelect={loadChat}
                   onToggleMenu={(id) => setOpenChatMenuId((current) => (current === id ? null : id))}
+                  onBranch={branchChat}
                   onDelete={removeChat}
                   onRename={renameChat}
                   onExport={exportChat}
@@ -3681,7 +4051,7 @@ export default function ChatApp() {
                     }`}
                     title="Toggle instructions visibility"
                   >
-                    <span>Instructions</span>
+                    <span>Prompt</span>
                   </button>
                   </div>
                   <div data-menu-container="true" className="relative">
@@ -3812,6 +4182,62 @@ export default function ChatApp() {
             className="flex-1 overflow-y-auto scroll-thin"
           >
             <div className={`mx-auto w-full space-y-3 pr-1 ${sidebarOpen ? 'max-w-3xl' : 'max-w-5xl'}`}>
+            {activeChatId && (
+              <section className="rounded-2xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/50">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Branching & Snapshots</h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {activeChatMeta?.parentChatId
+                        ? `Branch chat${activeChatMeta?.branchLabel ? ` · ${activeChatMeta.branchLabel}` : ''}`
+                        : 'Create a branch before experimenting, or save a restore point first.'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => branchChat(activeChatId)}
+                      className="rounded-xl border border-black/10 bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-white/10"
+                    >
+                      Branch Chat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveSnapshot}
+                      className="rounded-xl bg-accent px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
+                    >
+                      Save Snapshot
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <select
+                    value={selectedSnapshotId}
+                    onChange={(event) => setSelectedSnapshotId(event.target.value)}
+                    disabled={!Array.isArray(activeChatMeta?.snapshots) || activeChatMeta.snapshots.length === 0}
+                    className="min-w-0 flex-1 rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-xs outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-slate-800"
+                  >
+                    {Array.isArray(activeChatMeta?.snapshots) && activeChatMeta.snapshots.length > 0 ? (
+                      [...activeChatMeta.snapshots].reverse().map((snapshot) => (
+                        <option key={snapshot.id} value={snapshot.id}>
+                          {snapshot.label} · {snapshot.messageCount} msgs
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No snapshots yet</option>
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={restoreSnapshot}
+                    disabled={!selectedSnapshotId}
+                    className="rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-white/10"
+                  >
+                    Restore Snapshot
+                  </button>
+                </div>
+              </section>
+            )}
             {canvasEnabled && (
               <section className="rounded-2xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/50">
                 <div className="mb-2 flex items-center justify-between">

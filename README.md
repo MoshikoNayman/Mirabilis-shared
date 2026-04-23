@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-**Version:** 26.3R1-S24  
+**Version:** 26.3R1-S25  
 **Author:** Moshiko Nayman
 
 Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API—your choice, per conversation.
@@ -113,6 +113,8 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | Category | Feature |
 |---|---|
 | **Chat** | Streaming AI chat with persistent local history |
+| **Chat** | Built-in and custom instruction profiles, persisted per chat |
+| **Chat** | Chat branching and restore snapshots for safe experimentation |
 | **Chat** | File attachments and image messages per conversation |
 | **Chat** | Canvas mode, Deep Thinking mode, Guided Learning mode |
 | **Providers** | 10 providers: Ollama, OpenAI, Grok, Groq, OpenRouter, Gemini, Claude, GPUaaS, Custom Endpoint, KoboldCpp |
@@ -195,6 +197,15 @@ node run.js --log
 ## MCP Client
 
 Mirabilis can connect **to** external MCP servers (Junos, Synology, Debian, etc.) from the UI. Configure servers in the **MCP** panel. Connections are persisted in `backend/data/mcp-servers.json`.
+
+---
+
+## Chat Workflow
+
+- **Instruction profiles**: Choose from built-in instruction profiles or save your current instructions as a custom reusable profile.
+- **Per-chat instructions**: Mirabilis now keeps the selected profile and current instructions with each chat, so switching conversations does not silently reset your setup.
+- **Branch chat**: Clone the current conversation into a new branch before trying a different prompt, model, or reasoning path.
+- **Snapshots**: Save restore points for an active chat, then roll back to a selected snapshot later from the chat header.
 
 ---
 

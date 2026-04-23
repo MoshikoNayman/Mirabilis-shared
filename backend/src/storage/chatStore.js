@@ -65,7 +65,10 @@ export async function listChats(filePath) {
       title: chat.title,
       createdAt: chat.createdAt,
       updatedAt: chat.updatedAt,
-      messageCount: chat.messages.length
+      messageCount: chat.messages.length,
+      snapshotCount: Array.isArray(chat.snapshots) ? chat.snapshots.length : 0,
+      parentChatId: chat.parentChatId || '',
+      branchLabel: chat.branchLabel || ''
     }))
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }

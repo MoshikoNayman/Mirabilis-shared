@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S25] — 2026-04-15
+
+### Chat Control: Instruction Profiles, Branching, and Snapshots
+
+- **Instruction profiles**: Added built-in instruction profiles in the chat UI, including Mirabilis Default, Network Engineer, Research Analyst, Guided Tutor, and Remote Operator.
+- **Saved custom profiles**: Current instructions can now be saved as reusable custom profiles and deleted from the UI when no longer needed.
+- **Per-chat instruction persistence**: Selected profile and instruction text now persist with each chat instead of living only in browser-local state.
+- **Chat branching**: Any existing conversation can now be cloned into a new branch so users can explore alternate prompts, edits, or reasoning paths without mutating the source chat.
+- **Snapshots**: Active chats can now save restore points and roll back to a selected snapshot later.
+- **Sidebar metadata**: Chat list rows now show branch and snapshot badges for faster scanning.
+- **Scope**: This phase deliberately stayed within the existing chat model and JSON store, avoiding a heavier workspace migration while still adding real conversational control.
+
 ## [26.3R1-S24] — 2026-04-13
 
 ### Multi-Provider Expansion: OpenRouter, Groq, GPUaaS + Build Reliability

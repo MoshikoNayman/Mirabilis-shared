@@ -55,6 +55,47 @@ function makeTitle(input) {
   return trimmed.length > 40 ? `${trimmed.slice(0, 40)}...` : trimmed;
 }
 
+function normalizePromptProfileId(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed.slice(0, 80) : '';
+}
+
+function normalizeSystemPrompt(value) {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  return value.slice(0, 16000);
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function buildSnapshotRecord(chat, label = '') {
+  const timestamp = nowIso();
+  const trimmedLabel = String(label || '').trim().slice(0, 80);
+  return {
+    id: uuidv4(),
+    label: trimmedLabel || `Snapshot ${new Date(timestamp).toLocaleString()}`,
+    createdAt: timestamp,
+    messageCount: Array.isArray(chat.messages) ? chat.messages.length : 0,
+    state: {
+      messages: cloneJson(chat.messages || []),
+      systemPrompt: typeof chat.systemPrompt === 'string' ? chat.systemPrompt : '',
+      promptProfileId: normalizePromptProfileId(chat.promptProfileId),
+      uncensoredMode: chat.uncensoredMode === true
+    }
+  };
+}
+
+function sanitizeSnapshots(chat) {
+  if (!Array.isArray(chat.snapshots)) {
+    chat.snapshots = [];
+    return;
+  }
+  chat.snapshots = chat.snapshots.slice(-20);
+}
+
 async function generateChatTitle({ content, provider, model, config: cfg }) {
   const snippet = content.trim().slice(0, 300);
   const titleMessages = [
@@ -1850,12 +1891,18 @@ app.get('/api/chats', async (_req, res) => {
 
 app.post('/api/chats', async (req, res) => {
   const timestamp = nowIso();
+  const systemPrompt = normalizeSystemPrompt(req.body?.systemPrompt);
   const chat = {
     id: uuidv4(),
     title: req.body?.title || 'New Chat',
     createdAt: timestamp,
     updatedAt: timestamp,
     uncensoredMode: req.body?.uncensoredMode === true,
+    promptProfileId: normalizePromptProfileId(req.body?.promptProfileId),
+    parentChatId: normalizePromptProfileId(req.body?.parentChatId),
+    branchLabel: String(req.body?.branchLabel || '').trim().slice(0, 80),
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    snapshots: [],
     messages: []
   };
 
@@ -1899,8 +1946,83 @@ app.patch('/api/chats/:chatId', async (req, res) => {
     chat.title = req.body.title.trim().slice(0, 80);
     chat.updatedAt = nowIso();
   }
+  if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'systemPrompt')) {
+    const systemPrompt = normalizeSystemPrompt(req.body?.systemPrompt);
+    if (systemPrompt !== undefined) {
+      chat.systemPrompt = systemPrompt;
+      chat.updatedAt = nowIso();
+    }
+  }
+  if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'promptProfileId')) {
+    chat.promptProfileId = normalizePromptProfileId(req.body?.promptProfileId);
+    chat.updatedAt = nowIso();
+  }
   await saveChat(config.chatStorePath, chat);
   res.json({ chat });
+});
+
+app.post('/api/chats/:chatId/branch', async (req, res) => {
+  const source = await getChat(config.chatStorePath, req.params.chatId);
+  if (!source) {
+    res.status(404).json({ error: 'Chat not found' });
+    return;
+  }
+
+  const timestamp = nowIso();
+  const branchLabel = String(req.body?.branchLabel || '').trim().slice(0, 80) || `Branch ${new Date(timestamp).toLocaleString()}`;
+  const branch = {
+    ...cloneJson(source),
+    id: uuidv4(),
+    title: `${source.title} (${branchLabel})`.slice(0, 80),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    parentChatId: source.id,
+    branchLabel,
+    snapshots: Array.isArray(source.snapshots) ? cloneJson(source.snapshots) : []
+  };
+
+  sanitizeSnapshots(branch);
+  await saveChat(config.chatStorePath, branch);
+  res.status(201).json({ chat: branch });
+});
+
+app.post('/api/chats/:chatId/snapshots', async (req, res) => {
+  const chat = await getChat(config.chatStorePath, req.params.chatId);
+  if (!chat) {
+    res.status(404).json({ error: 'Chat not found' });
+    return;
+  }
+
+  const snapshot = buildSnapshotRecord(chat, req.body?.label);
+  chat.snapshots = Array.isArray(chat.snapshots) ? chat.snapshots : [];
+  chat.snapshots.push(snapshot);
+  sanitizeSnapshots(chat);
+  chat.updatedAt = nowIso();
+  await saveChat(config.chatStorePath, chat);
+  res.status(201).json({ snapshot, chat });
+});
+
+app.post('/api/chats/:chatId/snapshots/:snapshotId/restore', async (req, res) => {
+  const chat = await getChat(config.chatStorePath, req.params.chatId);
+  if (!chat) {
+    res.status(404).json({ error: 'Chat not found' });
+    return;
+  }
+
+  const snapshots = Array.isArray(chat.snapshots) ? chat.snapshots : [];
+  const snapshot = snapshots.find((item) => item.id === req.params.snapshotId);
+  if (!snapshot?.state) {
+    res.status(404).json({ error: 'Snapshot not found' });
+    return;
+  }
+
+  chat.messages = cloneJson(snapshot.state.messages || []);
+  chat.systemPrompt = typeof snapshot.state.systemPrompt === 'string' ? snapshot.state.systemPrompt : '';
+  chat.promptProfileId = normalizePromptProfileId(snapshot.state.promptProfileId);
+  chat.uncensoredMode = snapshot.state.uncensoredMode === true;
+  chat.updatedAt = nowIso();
+  await saveChat(config.chatStorePath, chat);
+  res.json({ chat, restoredSnapshotId: snapshot.id });
 });
 
 app.delete('/api/chats', async (_req, res) => {
