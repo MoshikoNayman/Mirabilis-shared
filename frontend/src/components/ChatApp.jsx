@@ -3727,7 +3727,7 @@ export default function ChatApp() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 self-start">
+          <div className="grid grid-cols-3 gap-2">
             <button
               onClick={createChat}
               className="rounded-full bg-accent px-2 py-1.5 text-xs font-semibold text-white shadow-[0_6px_14px_-8px_rgba(26,168,111,0.9)] transition hover:brightness-95"
