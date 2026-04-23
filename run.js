@@ -258,6 +258,17 @@ async function waitForEndpoint(url, timeoutMs, label, processObj, logFile) {
   throw new Error(`${label} did not become ready at ${url}`);
 }
 
+async function ensureServiceRunning({ label, url, timeoutMs, spawnService }) {
+  if (await endpointReady(url)) {
+    statusLine('INFO', `${label} already running; reusing existing service`);
+    return null;
+  }
+
+  const processObj = spawnService();
+  await waitForEndpoint(url, timeoutMs, label, processObj);
+  return processObj;
+}
+
 function ensureDeps() {
   const missingNode = !fs.existsSync(path.join(BACKEND_DIR, 'node_modules')) || !fs.existsSync(path.join(FRONTEND_DIR, 'node_modules'));
   if (missingNode) {
@@ -1267,13 +1278,22 @@ async function main() {
 
   await withPhase('Services', async () => {
     const backendLogFile = path.join(os.tmpdir(), 'backend.log');
-    managed.backend = spawnLogged(npmCommand(), npmArgs(['run', 'dev']), BACKEND_DIR, env, backendLogFile, logEnabled);
-    await waitForEndpoint('http://127.0.0.1:4000/health', 45000, 'Backend', managed.backend, backendLogFile);
+    managed.backend = await ensureServiceRunning({
+      label: 'Backend',
+      url: 'http://127.0.0.1:4000/health',
+      timeoutMs: 45000,
+      spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), BACKEND_DIR, env, backendLogFile, logEnabled)
+    });
     statusLine('OK', 'Backend: http://127.0.0.1:4000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
-    managed.frontend = spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
-    await waitForEndpoint('http://127.0.0.1:3000', 60000, 'Frontend');
+    const frontendLogFile = path.join(os.tmpdir(), 'frontend.log');
+    managed.frontend = await ensureServiceRunning({
+      label: 'Frontend',
+      url: 'http://127.0.0.1:3000',
+      timeoutMs: 60000,
+      spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, frontendLogFile, false)
+    });
     statusLine('OK', 'Frontend: http://127.0.0.1:3000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
@@ -1281,8 +1301,13 @@ async function main() {
     const imageStartupTimeoutMs = Number(process.env.IMAGE_SERVICE_STARTUP_TIMEOUT_MS || 900000);
     statusLine('INFO', `Waiting for image service readiness (timeout ${Math.round(imageStartupTimeoutMs / 1000)}s). First run may download model assets.`);
     statusLine('INFO', `Image service logs: ${path.join(os.tmpdir(), 'image-service.log')}`);
-    managed.image = spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, path.join(os.tmpdir(), 'image-service.log'), true);
-    await waitForEndpoint('http://127.0.0.1:7860/health', imageStartupTimeoutMs, 'Image service');
+    const imageLogFile = path.join(os.tmpdir(), 'image-service.log');
+    managed.image = await ensureServiceRunning({
+      label: 'Image service',
+      url: 'http://127.0.0.1:7860/health',
+      timeoutMs: imageStartupTimeoutMs,
+      spawnService: () => spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, true)
+    });
     statusLine('OK', 'Image service: http://127.0.0.1:7860');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
   });
@@ -1294,15 +1319,20 @@ async function main() {
   statusLine('INFO', 'Press Ctrl+C to stop.');
   process.stdout.write('\n');
 
+  const activeManaged = [managed.backend, managed.frontend, managed.image].filter(Boolean);
+  if (activeManaged.length === 0) {
+    await new Promise(() => {});
+  }
+
   await new Promise((resolve) => {
     let exited = 0;
     const onExit = () => {
       exited += 1;
-      if (exited >= 3) resolve();
+      if (exited >= activeManaged.length) resolve();
     };
-    managed.backend.on('exit', onExit);
-    managed.frontend.on('exit', onExit);
-    managed.image.on('exit', onExit);
+    for (const proc of activeManaged) {
+      proc.on('exit', onExit);
+    }
   });
 }
 
