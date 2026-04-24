@@ -1,22 +1,41 @@
 'use strict';
 
 // Must be set before app is ready
-const { app, BrowserWindow, shell, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, shell, Tray, Menu, nativeImage, dialog } = require('electron');
 app.name = 'Mirabilis AI';
+
+// ── Single-instance lock ───────────────────────────────────────────────────
+// Prevents a second launch fighting over ports 3000/4000
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+  });
+}
 const path = require('node:path');
-const { fork } = require('node:child_process');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 
+// Windows: set AppUserModelId so the taskbar groups correctly, pinning works,
+// and toast notifications show the right icon/name.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.mirabilis.ai');
+}
+
 const ROOT_DIR = path.join(__dirname, '..');
 
-// When packaged, child processes need real filesystem paths (not virtual asar paths).
-// asarUnpack ensures backend and standalone are in app.asar.unpacked on disk.
+// When packaged, backend/frontend standalone are copied via extraResources
+// and live directly under process.resourcesPath.
 const SPAWN_ROOT = app.isPackaged
-  ? path.join(process.resourcesPath, 'app.asar.unpacked')
+  ? process.resourcesPath
   : ROOT_DIR;
 
-const ICON_PATH = path.join(__dirname, 'icons', process.platform === 'darwin' ? 'icon.icns' : 'icon.png');
+const ICON_PATH = path.join(__dirname, 'icons',
+  process.platform === 'darwin' ? 'icon.icns' :
+  process.platform === 'win32'  ? 'Mirabilis.ico' :
+  'icon.png');
 
 // Custom About panel (macOS)
 if (process.platform === 'darwin') {
@@ -59,7 +78,7 @@ function startBackend() {
     backendProc = spawn(process.execPath, ['src/server.js'], {
       cwd: BACKEND_DIR,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1' }
+      env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1', DATA_DIR: app.getPath('userData') }
     });
     backendProc.stdout.pipe(out);
     backendProc.stderr.pipe(out);
@@ -68,7 +87,7 @@ function startBackend() {
     const deadline = Date.now() + 30000;
     const check = setInterval(async () => {
       try {
-        const res = await fetch('http://localhost:4000/api/providers/health', { signal: AbortSignal.timeout(1000) });
+        const res = await fetch('http://localhost:4000/health', { signal: AbortSignal.timeout(1000) });
         if (res.ok) { clearInterval(check); resolve(); }
       } catch {
         if (Date.now() > deadline) { clearInterval(check); reject(new Error('Backend did not start in time')); }
@@ -80,6 +99,15 @@ function startBackend() {
       if (code !== 0 && code !== null) {
         clearInterval(check);
         reject(new Error(`Backend exited with code ${code} — check ${path.join(LOG_DIR, 'backend.log')}`));
+      }
+    });
+  }).then(() => {
+    // Runtime crash handler — fires if backend dies after successful startup
+    backendProc.once('exit', (code) => {
+      if (code !== 0 && code !== null && !app.isQuiting) {
+        dialog.showErrorBox('Mirabilis — backend crashed',
+          `Backend exited unexpectedly (code ${code}).\nCheck ${path.join(LOG_DIR, 'backend.log')}`);
+        app.quit();
       }
     });
   });
@@ -152,8 +180,8 @@ function createWindow() {
   });
 
   mainWindow.on('close', (e) => {
-    // On macOS keep running in tray when window is closed
-    if (process.platform === 'darwin' && !app.isQuiting) {
+    // Minimize to tray on both macOS and Windows instead of quitting
+    if (!app.isQuiting) {
       e.preventDefault();
       mainWindow.hide();
     }
@@ -179,54 +207,62 @@ function createTray() {
 // ── App lifecycle ──────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   // Override the default application menu so nothing says "Electron"
-  const appMenu = Menu.buildFromTemplate([
-    {
-      label: 'Mirabilis AI',
-      submenu: [
-        { label: 'About Mirabilis AI', role: 'about' },
-        { type: 'separator' },
-        { label: 'Hide Mirabilis AI', accelerator: 'Command+H', role: 'hide' },
-        { label: 'Hide Others', accelerator: 'Command+Option+H', role: 'hideOthers' },
-        { label: 'Show All', role: 'unhide' },
-        { type: 'separator' },
-        { label: 'Quit Mirabilis AI', accelerator: 'Command+Q', click: () => { app.isQuiting = true; app.quit(); } }
-      ]
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }
-      ]
-    },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' },
-        { role: 'togglefullscreen' }
-      ]
-    },
-    {
-      label: 'Window',
-      submenu: [
-        { role: 'minimize' }, { role: 'zoom' }, { role: 'front' }
-      ]
-    }
-  ]);
-  Menu.setApplicationMenu(appMenu);
+  if (process.platform === 'darwin') {
+    // macOS: keep a proper app menu (required for standard Mac keyboard shortcuts)
+    const appMenu = Menu.buildFromTemplate([
+      {
+        label: 'Mirabilis AI',
+        submenu: [
+          { label: 'About Mirabilis AI', role: 'about' },
+          { type: 'separator' },
+          { label: 'Hide Mirabilis AI', accelerator: 'Command+H', role: 'hide' },
+          { label: 'Hide Others', accelerator: 'Command+Option+H', role: 'hideOthers' },
+          { label: 'Show All', role: 'unhide' },
+          { type: 'separator' },
+          { label: 'Quit Mirabilis AI', accelerator: 'Command+Q', click: () => { app.isQuiting = true; app.quit(); } }
+        ]
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+          { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }
+        ]
+      },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' },
+          { role: 'togglefullscreen' }
+        ]
+      },
+      {
+        label: 'Window',
+        submenu: [
+          { role: 'minimize' }, { role: 'zoom' }, { role: 'front' }
+        ]
+      }
+    ]);
+    Menu.setApplicationMenu(appMenu);
+  } else {
+    // Windows/Linux: no menu bar — cleaner UI for a chat app.
+    // Users can still right-click the tray icon to quit.
+    Menu.setApplicationMenu(null);
+  }
+
+  // Tray on all platforms — lets the app run in the background
+  createTray();
 
   if (process.platform === 'darwin') {
     // Set dock icon explicitly (BrowserWindow icon option doesn't affect dock on macOS)
     const dockIcon = nativeImage.createFromPath(path.join(__dirname, 'icons', 'icon.png'));
     app.dock.setIcon(dockIcon);
-    createTray();
   }
 
   try {
     await Promise.all([startBackend(), startFrontend()]);
     servicesStarted = true;
   } catch (err) {
-    const { dialog } = require('electron');
     dialog.showErrorBox('Mirabilis failed to start', err.message);
     app.quit();
     return;
@@ -245,8 +281,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// ── Orphaned process cleanup ───────────────────────────────────────────────
+// Kill child processes on any exit path including crashes
+function killChildren() {
+  try { if (frontendProc) { frontendProc.kill('SIGKILL'); frontendProc = null; } } catch {}
+  try { if (backendProc)  { backendProc.kill('SIGKILL');  backendProc = null; } } catch {}
+}
+
 app.on('before-quit', () => {
   app.isQuiting = true;
-  if (frontendProc) { frontendProc.kill(); frontendProc = null; }
-  if (backendProc)  { backendProc.kill();  backendProc = null; }
+  killChildren();
 });
+
+process.on('exit', killChildren);
+process.on('SIGTERM', killChildren);
