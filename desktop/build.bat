@@ -24,9 +24,32 @@ cd /d "%MIRABILIS%\frontend"
 call npm install --silent
 if errorlevel 1 goto error
 
+echo =^> Patching next.config.js for standalone build...
+set NEXT_CONFIG=%MIRABILIS%\frontend\next.config.js
+set NEXT_CONFIG_BAK=%TEMP%\mirabilis-next-config-%RANDOM%.bak
+copy "%NEXT_CONFIG%" "%NEXT_CONFIG_BAK%" >nul
+echo /** @type {import('next').NextConfig} */ > "%NEXT_CONFIG%"
+echo const path = require^('path'^); >> "%NEXT_CONFIG%"
+echo const nextConfig = { >> "%NEXT_CONFIG%"
+echo   reactStrictMode: true, >> "%NEXT_CONFIG%"
+echo   output: 'standalone', >> "%NEXT_CONFIG%"
+echo   outputFileTracingRoot: path.resolve^(__dirname, '..'^), >> "%NEXT_CONFIG%"
+echo }; >> "%NEXT_CONFIG%"
+echo module.exports = nextConfig; >> "%NEXT_CONFIG%"
+
 echo =^> Building Next.js frontend (standalone)...
 call npm run build
-if errorlevel 1 goto error
+set BUILD_EXIT=%ERRORLEVEL%
+
+echo =^> Restoring next.config.js...
+if exist "%NEXT_CONFIG_BAK%" (
+    copy "%NEXT_CONFIG_BAK%" "%NEXT_CONFIG%" >nul
+    del "%NEXT_CONFIG_BAK%" >nul
+) else (
+    echo WARNING: Could not restore next.config.js from backup.
+)
+
+if %BUILD_EXIT% neq 0 goto error
 
 set BUILD_DIR=%TEMP%\mirabilis-build-%RANDOM%
 mkdir "%BUILD_DIR%"
@@ -61,13 +84,26 @@ cd /d "%BUILD_DIR%"
 call npm install --silent
 if errorlevel 1 goto cleanup_error
 
+echo =^> Pre-extracting winCodeSign (avoids symlink error on Windows)...
+set CODESIGN_CACHE=%LOCALAPPDATA%\electron-builder\Cache\winCodeSign
+set SEVENZIP=%BUILD_DIR%\node_modules\7zip-bin\win\x64\7za.exe
+if not exist "%CODESIGN_CACHE%" mkdir "%CODESIGN_CACHE%"
+for /f "delims=" %%F in ('dir /b "%LOCALAPPDATA%\electron-builder\Cache\winCodeSign-*.7z" 2^>nul') do (
+    set ARCHIVE=%LOCALAPPDATA%\electron-builder\Cache\%%F
+    set DEST=%CODESIGN_CACHE%\%%~nF
+    if not exist "%CODESIGN_CACHE%\%%~nF" (
+        echo    Extracting %%F...
+        "%SEVENZIP%" x "%LOCALAPPDATA%\electron-builder\Cache\%%F" -o"%CODESIGN_CACHE%\%%~nF" -y >nul 2>&1
+    )
+)
+
 echo =^> Running electron-builder...
 call npx electron-builder --win --projectDir "%BUILD_DIR%"
 if errorlevel 1 goto cleanup_error
 
 echo =^> Copying output to dist\...
 if exist "%SCRIPT_DIR%dist" rmdir /s /q "%SCRIPT_DIR%dist"
-xcopy "%BUILD_DIR%\dist" "%SCRIPT_DIR%dist" /E /I /Q >nul
+xcopy "%BUILD_DIR%\dist" "%SCRIPT_DIR%dist" /E /I /Q /Y >nul
 
 echo =^> Cleaning up temp files...
 rmdir /s /q "%BUILD_DIR%"
@@ -87,4 +123,4 @@ pause
 exit /b 1
 
 :end
-pause
+exit /b 0

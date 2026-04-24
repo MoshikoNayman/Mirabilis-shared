@@ -20,5 +20,7 @@ export const config = {
   openAIModel: process.env.OPENAI_MODEL || 'model.gguf',
   tavilyApiKey: process.env.TAVILY_API_KEY || '',
   tavilySearchDepth: process.env.TAVILY_SEARCH_DEPTH || 'advanced',
-  chatStorePath: path.resolve(__dirname, '../data/chats.json')
+  chatStorePath: process.env.DATA_DIR
+    ? path.join(process.env.DATA_DIR, 'chats.json')
+    : path.resolve(__dirname, '../data/chats.json')
 };
