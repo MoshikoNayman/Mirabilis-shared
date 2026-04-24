@@ -7,6 +7,19 @@ Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js fronten
 
 ---
 
+## Prerequisites
+
+**Node.js 18+** must be installed before running Mirabilis.
+
+| Platform | Install |
+|---|---|
+| macOS | `brew install node` |
+| Linux | `sudo apt install nodejs npm` or see [nodejs.org](https://nodejs.org) |
+| FreeBSD / Solaris | `pkg install node` / `pkgadd nodejs` or build from [nodejs.org](https://nodejs.org) |
+| Windows | `winget install OpenJS.NodeJS` |
+
+---
+
 ## Quick Start
 
 ```bash
