@@ -28,6 +28,7 @@ Versioning follows Junos-style tags.
 - **Image service log cleanup**: Verbose HuggingFace HTTP logs no longer printed to terminal - redirected to log file only.
 - **Sidebar button alignment**: New Chat / Delete / Clear All buttons stretch to full sidebar width.
 - **Security**: Upgraded `uuid` dependency to clear a moderate audit advisory.
+
 ## [26.3R1-S24] - 2026-04-13
 
 ### Multi-Provider Expansion: OpenRouter, Groq, GPUaaS + Build Reliability
@@ -231,24 +232,24 @@ Versioning follows Junos-style tags.
 
 ## [26.3R1-S10] - 2026-04-12
 
-### MSQ GUI Install Fixes
+### MCQ GUI Install Fixes
 
-- Fixed GUI model install flow for MSQ models (`msq-pro-12b`, `msq-ultra-31b`, `msq-raw-8b`).
-- `POST /api/models/pull` now detects `msq-*` IDs and builds from local Modelfiles instead of trying registry-only pull behavior.
-- Added automatic base-model pull for MSQ installs when missing.
-- Added clearer streamed progress/status messages for MSQ build steps.
+- Fixed GUI model install flow for MCQ models (`mcq-pro-12b`, `mcq-ultra-31b`, `mcq-raw-8b`).
+- `POST /api/models/pull` now detects `mcq-*` IDs and builds from local Modelfiles instead of trying registry-only pull behavior.
+- Added automatic base-model pull for MCQ installs when missing.
+- Added clearer streamed progress/status messages for MCQ build steps.
 - Improved frontend install error handling so failures are shown in status text instead of silently disappearing.
 
 ---
 
 ## [26.3R1-S9] - 2026-04-12
 
-### MSQ Model Setup Reliability
+### MCQ Model Setup Reliability
 
-- Hardened `training/msq/setup.sh` for easier recovery when MSQ models fail to install.
+- Hardened `training/mcq/setup.sh` for easier recovery when MCQ models fail to install.
 - Added preflight checks for Ollama CLI presence and daemon availability.
 - Added automatic base-model pull before each `ollama create` step.
-- Added lighter install mode: `--skip-ultra` / `--lite` (or `MSQ_SKIP_ULTRA=1`) to skip the large Ultra model.
+- Added lighter install mode: `--skip-ultra` / `--lite` (or `MCQ_SKIP_ULTRA=1`) to skip the large Ultra model.
 - Improved error messages with actionable guidance for pull/create failures.
 
 ---
@@ -343,20 +344,20 @@ Versioning follows Junos-style tags.
 
 ## [26.3R1-S3] - 2026-04-10
 
-### MSQ Model Family
+### MCQ Model Family
 
-- **MSQ-Pro-12B** - deep-reasoning workhorse tuned on `gemma3:12b` (12B, 8.1 GB), 32 768-token context.
-- **MSQ-Ultra-31B** - flagship model tuned on `gemma4:31b` (~20 GB), 65 536-token context; most capable model in the family.
-- **MSQ-Raw-8B** - fully unrestricted variant tuned on `dolphin3` / Llama 3.1 (8B, 4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
-- Removed MSQ-Lite-4B from the lineup; MSQ-Pro-12B is the new entry point.
-- `training/msq/` directory - contains `Modelfile.msq-pro-12b`, `Modelfile.msq-ultra-31b`, `Modelfile.msq-raw-8b`, and `setup.sh` (`bash training/msq/setup.sh` creates all three models via `ollama create`).
-- MSQ group registered at the top of `CURATED_OLLAMA_MODELS` in `modelService.js` so models appear first in the model selector.
+- **MCQ-Pro-12B** - deep-reasoning workhorse tuned on `gemma3:12b` (12B, 8.1 GB), 32 768-token context.
+- **MCQ-Ultra-31B** - flagship model tuned on `gemma4:31b` (~20 GB), 65 536-token context; most capable model in the family.
+- **MCQ-Raw-8B** - fully unrestricted variant tuned on `dolphin3` / Llama 3.1 (8B, 4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
+- Removed MCQ-Lite-4B from the lineup; MCQ-Pro-12B is the new entry point.
+- `training/mcq/` directory - contains `Modelfile.mcq-pro-12b`, `Modelfile.mcq-ultra-31b`, `Modelfile.mcq-raw-8b`, and `setup.sh` (`bash training/mcq/setup.sh` creates all three models via `ollama create`).
+- MCQ group registered at the top of `CURATED_OLLAMA_MODELS` in `modelService.js` so models appear first in the model selector.
 
 ### Uncensored Mode Hardening
 
 - `UNCENSORED_DIRECTIVE` is now `unshift`-ed to array position 0 in the system-prompt chain, overriding any earlier instructions.
 - Platform-context confidentiality rules 3–5 are excluded when `chatUncensoredMode` is `true`, preventing them from silently suppressing the uncensored directive.
-- `isUncensoredModelRecord` pattern in `server.js` extended to match the `msq-raw` model ID.
+- `isUncensoredModelRecord` pattern in `server.js` extended to match the `mcq-raw` model ID.
 
 ### Web Search (www Chip)
 

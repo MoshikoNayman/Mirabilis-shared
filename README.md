@@ -145,7 +145,7 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **MCP Client** | Connect to external MCP servers with per-server tool approval policy |
 | **MCP Server** | Exposes Mirabilis as an MCP server to VS Code / GitHub Copilot / Claude Desktop |
 | **MCP Server** | System control tools: `system_info`, `list_dir`, `read_file`, `write_file`, `run_command` |
-| **MSQ Models** | Custom model family (Raw-8B, Pro-12B, Ultra-31B) tuned for Mirabilis |
+| **MCQ Models** | Custom model family (Raw-8B, Pro-12B, Ultra-31B) tuned for Mirabilis |
 | **Desktop App** | Package as a native macOS `.app` or Windows `.exe` from the `desktop/` folder |
 
 ---
@@ -271,48 +271,48 @@ backend/        Express API + provider adapters
     server.js
 image-service/  Local Stable Diffusion image generation
 providers/      Local runtime binaries (llama-server, koboldcpp)
-training/msq/   MSQ model family - Modelfiles and setup script
+training/mcq/   MCQ model family - Modelfiles and setup script
 config/         default.json - port, model, and path configuration
 run.js          Unified launcher, installer, doctor, logs, and cleanup
 ```
 
 ---
 
-## MSQ Model Family
+## MCQ Model Family
 
-MSQ is a custom model family created by Moshiko Nayman, built on publicly available base models and tuned specifically for Mirabilis workflows. Install via `training/msq/setup.sh` or pull directly through the Ollama panel in the UI.
+MCQ is a custom model family created by Moshiko Nayman, built on publicly available base models and tuned specifically for Mirabilis workflows. Install via `training/mcq/setup.sh` or pull directly through the Ollama panel in the UI.
 
 | Model             | Base                           | Params | Context | Character                                     |
 |-------------------|--------------------------------|-------:|--------:|-----------------------------------------------|
-| **MSQ-Raw-8B**    | dolphin3 / Llama 3.1 (4.9 GB) |     8B |   8 192 | Fast local inference. Fully unrestricted, no safety filters. |
-| **MSQ-Pro-12B**   | gemma3:12b (8.1 GB)            |    12B |  32 768 | Balanced quality and speed. Thorough, deep reasoning. Everyday workhorse. |
-| **MSQ-Ultra-31B** | gemma4:31b (~20 GB)            |    31B |  65 536 | Maximum local quality. Flagship depth and reasoning. |
+| **MCQ-Raw-8B**    | dolphin3 / Llama 3.1 (4.9 GB) |     8B |   8 192 | Fast local inference. Fully unrestricted, no safety filters. |
+| **MCQ-Pro-12B**   | gemma3:12b (8.1 GB)            |    12B |  32 768 | Balanced quality and speed. Thorough, deep reasoning. Everyday workhorse. |
+| **MCQ-Ultra-31B** | gemma4:31b (~20 GB)            |    31B |  65 536 | Maximum local quality. Flagship depth and reasoning. |
 
 ### Setup
 
 Requires Ollama. Run once to create all three models:
 
 ```bash
-bash training/msq/setup.sh
+bash training/mcq/setup.sh
 ```
 
 If Ultra is too heavy (download/memory), install a lighter set first:
 
 ```bash
-bash training/msq/setup.sh --lite
+bash training/mcq/setup.sh --lite
 ```
 
 The setup script now auto-pulls missing base models and prints clear diagnostics when a pull/create fails.
 
-Models will appear in the **MSQ** group at the top of the model selector after setup.
+Models will appear in the **MCQ** group at the top of the model selector after setup.
 
-You can also install MSQ models directly from the UI model menu in Ollama mode; Mirabilis now builds `msq-*` models from local Modelfiles when you click Install.
+You can also install MCQ models directly from the UI model menu in Ollama mode; Mirabilis now builds `mcq-*` models from local Modelfiles when you click Install.
 
 Model installs now run as server-side jobs (with status persistence and cancel support), so refresh/reload does not lose install state.
 
-> **MSQ-Ultra-31B** requires ~20 GB RAM/VRAM. Works on Apple Silicon Macs with 24 GB+ unified memory.
+> **MCQ-Ultra-31B** requires ~20 GB RAM/VRAM. Works on Apple Silicon Macs with 24 GB+ unified memory.
 >
-> **MSQ-Raw-8B** disables all content filters. Use responsibly and only on hardware you control.
+> **MCQ-Raw-8B** disables all content filters. Use responsibly and only on hardware you control.
 
 ## Notes
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-#  MSQ Model Setup — Mirabilis AI
-#  Registers MSQ-Pro-12B, MSQ-Ultra-31B, and MSQ-Raw-8B into your local Ollama instance.
+#  MCQ Model Setup — Mirabilis AI
+#  Registers MCQ-Pro-12B, MCQ-Ultra-31B, and MCQ-Raw-8B into your local Ollama instance.
 #  Run once. Re-run anytime to rebuild after editing a Modelfile.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -16,20 +16,20 @@ for arg in "$@"; do
       ;;
     -h|--help)
       cat <<'EOF'
-Usage: bash training/msq/setup.sh [--skip-ultra|--lite]
+Usage: bash training/mcq/setup.sh [--skip-ultra|--lite]
 
 Options:
-  --skip-ultra, --lite   Skip MSQ-Ultra-31B (large download / memory heavy)
+  --skip-ultra, --lite   Skip MCQ-Ultra-31B (large download / memory heavy)
 
 Environment:
-  MSQ_SKIP_ULTRA=1       Same as --skip-ultra
+  MCQ_SKIP_ULTRA=1       Same as --skip-ultra
 EOF
       exit 0
       ;;
   esac
 done
 
-if [[ "${MSQ_SKIP_ULTRA:-0}" == "1" ]]; then
+if [[ "${MCQ_SKIP_ULTRA:-0}" == "1" ]]; then
   SKIP_ULTRA=1
 fi
 
@@ -86,29 +86,29 @@ create() {
 }
 
 echo ""
-echo "  MSQ Model Setup — Mirabilis AI"
+echo "  MCQ Model Setup — Mirabilis AI"
 echo "  ═════════════════════════════════"
 
-create "msq-pro-12b"   "Modelfile.msq-pro-12b"   "gemma3:12b"      "8.1 GB"
+create "mcq-pro-12b"   "Modelfile.mcq-pro-12b"   "gemma3:12b"      "8.1 GB"
 
 if [[ "$SKIP_ULTRA" -eq 1 ]]; then
   echo ""
-  echo "  ┌─ msq-ultra-31b"
+  echo "  ┌─ mcq-ultra-31b"
   echo "  │  Base : gemma4:31b  (~20 GB)"
   echo "  │  Status : skipped (--skip-ultra/--lite)"
   echo "  └─ done"
 else
-  create "msq-ultra-31b" "Modelfile.msq-ultra-31b" "gemma4:31b"      "~20 GB"
+  create "mcq-ultra-31b" "Modelfile.mcq-ultra-31b" "gemma4:31b"      "~20 GB"
 fi
 
-create "msq-raw-8b"    "Modelfile.msq-raw-8b"    "dolphin3:latest"  "4.9 GB"
+create "mcq-raw-8b"    "Modelfile.mcq-raw-8b"    "dolphin3:latest"  "4.9 GB"
 
 echo ""
 if [[ "$SKIP_ULTRA" -eq 1 ]]; then
-  echo "  ✓  MSQ-Pro-12B and MSQ-Raw-8B are registered."
-  echo "  ✓  To add Ultra later: bash training/msq/setup.sh"
+  echo "  ✓  MCQ-Pro-12B and MCQ-Raw-8B are registered."
+  echo "  ✓  To add Ultra later: bash training/mcq/setup.sh"
 else
-  echo "  ✓  All three MSQ models are registered."
+  echo "  ✓  All three MCQ models are registered."
 fi
-echo "  ✓  Restart Mirabilis to see them in the model selector under 'MSQ'."
+echo "  ✓  Restart Mirabilis to see them in the model selector under 'MCQ'."
 echo ""
