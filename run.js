@@ -303,7 +303,8 @@ async function getListeningPidsOnPort(port) {
       const line = rawLine.trim();
       if (!line) continue;
       if (!line.includes('LISTENING')) continue;
-      if (!line.includes(`:${port}`)) continue;
+      // Use word-boundary match to avoid :3000 matching :30001 etc.
+      if (!new RegExp(`:${port}(?:\s|$)`).test(line)) continue;
       const parts = line.split(/\s+/);
       const pid = Number(parts[parts.length - 1]);
       if (Number.isInteger(pid) && pid > 0) pids.add(pid);
@@ -1396,7 +1397,10 @@ async function main() {
       const hasPortConflictHint = /eaddrinuse|address already in use|frontend exited with code 0/i.test(message);
       const frontendReady = await endpointReady('http://127.0.0.1:3000');
 
-      if (!frontendReady && hasPortConflictHint) {
+      if (frontendReady) {
+        // Frontend came up despite the error (race with exit-code-0); treat as running.
+        managed.frontend = null;
+      } else if (hasPortConflictHint) {
         const terminated = await terminateStaleMirabilisFrontendOnPort(3000);
         if (terminated > 0) {
           statusLine('WARN', `Frontend port 3000 was occupied by stale Mirabilis process(es); cleaned ${terminated} and retrying once`);
