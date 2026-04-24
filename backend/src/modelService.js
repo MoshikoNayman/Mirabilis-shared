@@ -6,10 +6,10 @@ import { streamOpenAICompatibleChat, listOpenAICompatibleModels } from './provid
 import { listAnthropicModels, streamAnthropicChat } from './providers/anthropic.js';
 
 const CURATED_OLLAMA_MODELS = [
-  // ── MSQ family — Mirabilis native models (built with training/msq/setup.sh)
-  { id: 'msq-pro-12b',   label: 'MSQ-Pro-12B',   group: 'MSQ', ollamaId: 'msq-pro-12b',   size: '8.1 GB' },
-  { id: 'msq-ultra-31b', label: 'MSQ-Ultra-31B', group: 'MSQ', ollamaId: 'msq-ultra-31b', size: '~20 GB' },
-  { id: 'msq-raw-8b',    label: 'MSQ-Raw-8B',    group: 'MSQ', ollamaId: 'msq-raw-8b',    size: '4.9 GB', uncensored: true },
+  // ── MCQ family — Mirabilis native models (built with training/mcq/setup.sh)
+  { id: 'mcq-pro-12b',   label: 'MCQ-Pro-12B',   group: 'MCQ', ollamaId: 'mcq-pro-12b',   size: '8.1 GB' },
+  { id: 'mcq-ultra-31b', label: 'MCQ-Ultra-31B', group: 'MCQ', ollamaId: 'mcq-ultra-31b', size: '~20 GB' },
+  { id: 'mcq-raw-8b',    label: 'MCQ-Raw-8B',    group: 'MCQ', ollamaId: 'mcq-raw-8b',    size: '4.9 GB', uncensored: true },
   // Lightweight models — run well on most hardware
   { id: 'llama3',         label: 'Llama 3',           group: 'Lightweight', ollamaId: 'llama3',           size: '4.7 GB' },
   { id: 'llama3.1',       label: 'Llama 3.1',         group: 'Lightweight', ollamaId: 'llama3.1',         size: '4.7 GB' },

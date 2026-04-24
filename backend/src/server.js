@@ -130,7 +130,7 @@ function isUncensoredModelRecord(item) {
   return (
     String(item?.group || '').toLowerCase() === 'uncensored' ||
     item?.uncensored === true ||
-    /uncensored|dolphin|abliterated|surge|msq-raw/.test(haystack)
+    /uncensored|dolphin|abliterated|surge|mcq-raw/.test(haystack)
   );
 }
 
@@ -789,10 +789,10 @@ app.post('/api/providers/switch-model', async (req, res) => {
 
 // Ollama model IDs are alphanumeric + hyphens/dots/colons — validate before forwarding
 const SAFE_MODEL_RE = /^[a-z0-9][a-z0-9._:/-]{0,99}$/i;
-const MSQ_MODEL_SPECS = {
-  'msq-pro-12b': { base: 'gemma3:12b', modelfile: 'Modelfile.msq-pro-12b' },
-  'msq-ultra-31b': { base: 'gemma4:31b', modelfile: 'Modelfile.msq-ultra-31b' },
-  'msq-raw-8b': { base: 'dolphin3:latest', modelfile: 'Modelfile.msq-raw-8b' }
+const MCQ_MODEL_SPECS = {
+  'mcq-pro-12b': { base: 'gemma3:12b', modelfile: 'Modelfile.mcq-pro-12b' },
+  'mcq-ultra-31b': { base: 'gemma4:31b', modelfile: 'Modelfile.mcq-ultra-31b' },
+  'mcq-raw-8b': { base: 'dolphin3:latest', modelfile: 'Modelfile.mcq-raw-8b' }
 };
 const modelInstallJobs = new Map(); // jobId -> job
 
@@ -969,16 +969,16 @@ async function streamOllamaPullToJob(upstream, job, statusPrefix = '') {
 async function runInstallJob(job) {
   const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
   const modelId = String(job.modelId).trim().toLowerCase();
-  const isMsqModel = Object.prototype.hasOwnProperty.call(MSQ_MODEL_SPECS, modelId);
+  const isMcqModel = Object.prototype.hasOwnProperty.call(MCQ_MODEL_SPECS, modelId);
 
   updateJob(job, { status: 'running', message: `Preparing ${modelId}`, pct: null, error: null });
 
   try {
-    if (isMsqModel) {
-      const { base, modelfile } = MSQ_MODEL_SPECS[modelId];
-      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'msq', modelfile);
+    if (isMcqModel) {
+      const { base, modelfile } = MCQ_MODEL_SPECS[modelId];
+      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'mcq', modelfile);
       if (!existsSync(modelfilePath)) {
-        throw new Error(`MSQ Modelfile not found: ${modelfilePath}`);
+        throw new Error(`MCQ Modelfile not found: ${modelfilePath}`);
       }
 
       const baseCheck = await runProcess('ollama', ['show', base], {
@@ -1111,7 +1111,7 @@ app.post('/api/models/pull', async (req, res) => {
     return res.status(400).json({ error: 'Invalid model ID' });
   }
   const requestedModelId = String(modelId).trim().toLowerCase();
-  const isMsqModel = Object.prototype.hasOwnProperty.call(MSQ_MODEL_SPECS, requestedModelId);
+  const isMcqModel = Object.prototype.hasOwnProperty.call(MCQ_MODEL_SPECS, requestedModelId);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -1125,11 +1125,11 @@ app.post('/api/models/pull', async (req, res) => {
   try {
     const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
 
-    if (isMsqModel) {
-      const { base, modelfile } = MSQ_MODEL_SPECS[requestedModelId];
-      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'msq', modelfile);
+    if (isMcqModel) {
+      const { base, modelfile } = MCQ_MODEL_SPECS[requestedModelId];
+      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'mcq', modelfile);
       if (!existsSync(modelfilePath)) {
-        send('error', { message: `MSQ Modelfile not found: ${modelfilePath}` });
+        send('error', { message: `MCQ Modelfile not found: ${modelfilePath}` });
         return res.end();
       }
 
