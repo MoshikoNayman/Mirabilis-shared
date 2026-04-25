@@ -191,6 +191,28 @@ test('hardening guardrails enforce payload limits and record policy audit events
       // events seeded during this test should appear in 24h and 30d windows
       assert.ok(trendsPayload.trends.event_count_24h >= 1);
       assert.ok(trendsPayload.trends.top_types_24h.some((item) => item.event_type === 'session.retention_run_executed'));
+
+      // tenant rollup endpoint
+      const missingTenantIdentity = await fetch(`${baseUrl}/api/intelledger/audit/trends/tenants`);
+      assert.equal(missingTenantIdentity.status, 400);
+
+      const tenantRollup = await fetch(
+        `${baseUrl}/api/intelledger/audit/trends/tenants?userId=hardening-user&top_n=10`
+      );
+      assert.equal(tenantRollup.status, 200);
+      const rollupPayload = await tenantRollup.json();
+      assert.ok(rollupPayload?.rollup);
+      assert.ok(Array.isArray(rollupPayload.rollup.tenants));
+      assert.ok(typeof rollupPayload.rollup.tenant_count === 'number');
+      assert.ok(typeof rollupPayload.rollup.sampled_window_days === 'number');
+      // each entry should have per-window counts and top_types
+      for (const tenant of rollupPayload.rollup.tenants) {
+        assert.ok(typeof tenant.tenant_id === 'string');
+        assert.ok(typeof tenant.count_24h === 'number');
+        assert.ok(typeof tenant.count_7d === 'number');
+        assert.ok(typeof tenant.count_30d === 'number');
+        assert.ok(Array.isArray(tenant.top_types));
+      }
     });
   } finally {
     if (previousEnv.INTELLEDGER_MAX_TEXT_INGEST_CHARS === undefined) delete process.env.INTELLEDGER_MAX_TEXT_INGEST_CHARS;

@@ -1437,6 +1437,68 @@ export function createIntelLedgerStorage(filePath) {
       };
     },
 
+    async getAuditTenantRollup(options = {}) {
+      const store = await get();
+      const topN = Math.max(1, Math.min(Number(options.topN || 20) || 20, 100));
+      const callerTenantId = options.callerTenantId ? String(options.callerTenantId) : null;
+
+      const now = Date.now();
+      const msPerHour = 60 * 60 * 1000;
+      const since30d = now - 30 * 24 * msPerHour;
+      const since7d = now - 7 * 24 * msPerHour;
+      const since24h = now - 24 * msPerHour;
+
+      // Tenants map: tenantId -> { count_24h, count_7d, count_30d, top_types Map }
+      const tenantMap = new Map();
+
+      for (const event of store.audit_events) {
+        const ts = new Date(event.created_at || 0).getTime();
+        if (!Number.isFinite(ts) || ts < since30d) continue;
+
+        const tenantKey = String(event.actor_tenant_id || 'unknown');
+        // If caller is scoped to a specific tenant, only show that tenant
+        if (callerTenantId && tenantKey !== callerTenantId) continue;
+
+        if (!tenantMap.has(tenantKey)) {
+          tenantMap.set(tenantKey, {
+            tenant_id: tenantKey,
+            count_24h: 0,
+            count_7d: 0,
+            count_30d: 0,
+            top_types: new Map()
+          });
+        }
+
+        const entry = tenantMap.get(tenantKey);
+        entry.count_30d += 1;
+        if (ts >= since7d) entry.count_7d += 1;
+        if (ts >= since24h) entry.count_24h += 1;
+
+        const typeKey = String(event.event_type || 'unknown');
+        entry.top_types.set(typeKey, (entry.top_types.get(typeKey) || 0) + 1);
+      }
+
+      const tenants = Array.from(tenantMap.values())
+        .map((entry) => ({
+          tenant_id: entry.tenant_id,
+          count_24h: entry.count_24h,
+          count_7d: entry.count_7d,
+          count_30d: entry.count_30d,
+          top_types: Array.from(entry.top_types.entries())
+            .map(([event_type, count]) => ({ event_type, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 5)
+        }))
+        .sort((a, b) => b.count_30d - a.count_30d)
+        .slice(0, topN);
+
+      return {
+        tenants,
+        tenant_count: tenantMap.size,
+        sampled_window_days: 30
+      };
+    },
+
     async runBatchEvaluation(sessionIds = [], options = {}) {
       const uniqueIds = [...new Set((Array.isArray(sessionIds) ? sessionIds : []).map((item) => String(item || '').trim()).filter(Boolean))];
       const runs = [];

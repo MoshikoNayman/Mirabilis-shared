@@ -1042,6 +1042,35 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     }
   });
 
+  router.get('/audit/trends/tenants', async (req, res) => {
+    try {
+      if (typeof storage.getAuditTenantRollup !== 'function') {
+        return res.status(501).json({ error: 'Tenant rollup is not supported by this storage backend.' });
+      }
+
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+      if (!identity.userId && !identity.trustedUserId && !identity.tenantId) {
+        return res.status(400).json({ error: 'userId or tenant context is required.' });
+      }
+
+      const topN = Math.max(1, Math.min(Number(req.query?.top_n || req.query?.topN || 20) || 20, 100));
+
+      // Scoped callers can only see their own tenant; only unscoped userId callers see all tenants
+      let callerTenantId = null;
+      if (identity.trustedTenantId) {
+        callerTenantId = identity.trustedTenantId;
+      } else if (identity.tenantId) {
+        callerTenantId = identity.tenantId;
+      }
+
+      const rollup = await storage.getAuditTenantRollup({ topN, callerTenantId });
+      return res.json({ rollup });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   router.use('/sessions/:sessionId', async (req, res, next) => {
     try {
       const identity = resolveIdentity(req);
