@@ -245,6 +245,20 @@ function IntelLedgerApp({ userId }) {
   const [auditTenantRollup, setAuditTenantRollup] = useState([]);
   const [auditOverviewLoading, setAuditOverviewLoading] = useState(false);
   const [auditLastUpdatedAt, setAuditLastUpdatedAt] = useState('');
+  const [promptProfiles, setPromptProfiles] = useState([]);
+  const [promptProfilesLoading, setPromptProfilesLoading] = useState(false);
+  const [activePromptProfileId, setActivePromptProfileId] = useState('');
+  const [promptProfileDetail, setPromptProfileDetail] = useState(null);
+  const [promptDetailLoading, setPromptDetailLoading] = useState(false);
+  const [promptMutationLoading, setPromptMutationLoading] = useState(false);
+  const [promptRegistryError, setPromptRegistryError] = useState('');
+  const [newPromptVersion, setNewPromptVersion] = useState({
+    version_id: '',
+    label: '',
+    system_prompt: '',
+    user_template: '',
+    set_active: true
+  });
 
   const toggleSelect = (id) => {
     setSelectedSessions((prev) => {
@@ -340,6 +354,108 @@ function IntelLedgerApp({ userId }) {
     }
   };
 
+  const loadPromptProfiles = async () => {
+    setPromptProfilesLoading(true);
+    setPromptRegistryError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/intelledger/prompts/profiles`);
+      const payload = await readJsonOrThrow(res, 'Failed to load prompt profiles.');
+      const rows = Array.isArray(payload?.profiles) ? payload.profiles : [];
+      setPromptProfiles(rows);
+      setActivePromptProfileId((prev) => {
+        if (prev && rows.some((item) => item.profile_id === prev)) return prev;
+        return rows[0]?.profile_id || '';
+      });
+      if (!rows.length) {
+        setPromptProfileDetail(null);
+      }
+    } catch (err) {
+      setPromptProfiles([]);
+      setPromptProfileDetail(null);
+      setPromptRegistryError(err?.message || 'Prompt registry unavailable.');
+    } finally {
+      setPromptProfilesLoading(false);
+    }
+  };
+
+  const loadPromptProfileDetail = async (profileId) => {
+    if (!profileId) {
+      setPromptProfileDetail(null);
+      return;
+    }
+
+    setPromptDetailLoading(true);
+    setPromptRegistryError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/intelledger/prompts/profiles/${encodeURIComponent(profileId)}`);
+      const payload = await readJsonOrThrow(res, 'Failed to load prompt profile detail.');
+      setPromptProfileDetail(payload?.profile || null);
+    } catch (err) {
+      setPromptProfileDetail(null);
+      setPromptRegistryError(err?.message || 'Failed to load prompt profile detail.');
+    } finally {
+      setPromptDetailLoading(false);
+    }
+  };
+
+  const createPromptVersion = async () => {
+    if (!activePromptProfileId) return;
+    setPromptMutationLoading(true);
+    setPromptRegistryError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/intelledger/prompts/profiles/${encodeURIComponent(activePromptProfileId)}/versions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version_id: String(newPromptVersion.version_id || '').trim() || undefined,
+          label: String(newPromptVersion.label || '').trim() || undefined,
+          system_prompt: String(newPromptVersion.system_prompt || ''),
+          user_template: String(newPromptVersion.user_template || ''),
+          set_active: Boolean(newPromptVersion.set_active),
+          created_by: 'frontend-ui'
+        })
+      });
+      await readJsonOrThrow(res, 'Failed to create prompt version.');
+
+      setNewPromptVersion((prev) => ({
+        ...prev,
+        version_id: '',
+        label: ''
+      }));
+
+      await Promise.all([
+        loadPromptProfiles(),
+        loadPromptProfileDetail(activePromptProfileId)
+      ]);
+    } catch (err) {
+      setPromptRegistryError(err?.message || 'Failed to create prompt version.');
+    } finally {
+      setPromptMutationLoading(false);
+    }
+  };
+
+  const selectPromptVersion = async (profileId, versionId) => {
+    if (!profileId || !versionId) return;
+    setPromptMutationLoading(true);
+    setPromptRegistryError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/intelledger/prompts/profiles/${encodeURIComponent(profileId)}/select`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version_id: versionId })
+      });
+      await readJsonOrThrow(res, 'Failed to activate prompt version.');
+      await Promise.all([
+        loadPromptProfiles(),
+        loadPromptProfileDetail(profileId)
+      ]);
+    } catch (err) {
+      setPromptRegistryError(err?.message || 'Failed to activate prompt version.');
+    } finally {
+      setPromptMutationLoading(false);
+    }
+  };
+
   const bulkExport = async () => {
     const ids = [...selectedSessions];
     const sessionNames = sessions.filter((s) => ids.includes(s.id)).map((s) => s.title);
@@ -392,6 +508,11 @@ function IntelLedgerApp({ userId }) {
       window.removeEventListener('keydown', handleEscape);
     };
   }, [createBubbleOpen]);
+
+  useEffect(() => {
+    if (!activePromptProfileId || localMode) return;
+    loadPromptProfileDetail(activePromptProfileId);
+  }, [activePromptProfileId, localMode]);
 
   const activeSessionRecord = useMemo(
     () => sessions.find((session) => session.id === activeSession) || null,
@@ -484,6 +605,10 @@ function IntelLedgerApp({ userId }) {
     setAuditOverview(null);
     setAuditTenantRollup([]);
     setAuditLastUpdatedAt('');
+    setPromptProfiles([]);
+    setActivePromptProfileId('');
+    setPromptProfileDetail(null);
+    setPromptRegistryError('');
     setLocalMode(true);
   };
 
@@ -496,7 +621,8 @@ function IntelLedgerApp({ userId }) {
       setSessions(sessions);
       await Promise.all([
         loadTodayDigest(sessions),
-        loadAuditOverview()
+        loadAuditOverview(),
+        loadPromptProfiles()
       ]);
       setSemanticSessions([]);
       setLocalMode(false);
@@ -843,6 +969,182 @@ function IntelLedgerApp({ userId }) {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!localMode && (promptProfilesLoading || promptProfiles.length > 0 || promptRegistryError) && (
+          <div className="rounded-2xl border border-black/10 bg-white/75 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                Prompt Registry
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  loadPromptProfiles();
+                  if (activePromptProfileId) loadPromptProfileDetail(activePromptProfileId);
+                }}
+                disabled={promptProfilesLoading || promptDetailLoading || promptMutationLoading}
+                className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+              >
+                Refresh prompts
+              </button>
+            </div>
+
+            {promptRegistryError && (
+              <div className="mb-3 rounded-xl border border-red-300/70 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300">
+                {promptRegistryError}
+              </div>
+            )}
+
+            {promptProfilesLoading ? (
+              <div className="text-xs text-slate-500 dark:text-slate-400">Loading prompt profiles...</div>
+            ) : promptProfiles.length === 0 ? (
+              <div className="text-xs text-slate-500 dark:text-slate-400">No prompt profiles available.</div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-[minmax(14rem,0.7fr)_minmax(0,1.3fr)]">
+                <div className="space-y-2">
+                  {promptProfiles.map((profile) => {
+                    const isActive = profile.profile_id === activePromptProfileId;
+                    return (
+                      <button
+                        key={profile.profile_id}
+                        type="button"
+                        onClick={() => setActivePromptProfileId(profile.profile_id)}
+                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                          isActive
+                            ? 'border-accent/50 bg-accent/10'
+                            : 'border-black/10 bg-white/60 hover:border-accent/30 dark:border-white/10 dark:bg-slate-900/35'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">{profile.profile_id}</div>
+                        <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          Active {profile.active_label || profile.active_version_id || 'fallback'}
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-slate-400">Versions {profile.version_count || 0}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-black/10 bg-white/60 px-3 py-3 dark:border-white/10 dark:bg-slate-900/35">
+                  {promptDetailLoading ? (
+                    <div className="text-xs text-slate-500 dark:text-slate-400">Loading profile details...</div>
+                  ) : !promptProfileDetail ? (
+                    <div className="text-xs text-slate-500 dark:text-slate-400">Select a profile to view versions.</div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Profile {promptProfileDetail.profile_id}</span>
+                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Active {promptProfileDetail.active_version_id || 'fallback'}</span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {(promptProfileDetail.versions || []).map((version) => {
+                          const selected = version.id === promptProfileDetail.active_version_id;
+                          return (
+                            <div key={version.id} className="rounded-lg border border-black/10 bg-white/70 px-2.5 py-2 dark:border-white/10 dark:bg-slate-800/40">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-100">{version.label || version.id}</div>
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400">{version.id}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={selected || promptMutationLoading}
+                                  onClick={() => selectPromptVersion(promptProfileDetail.profile_id, version.id)}
+                                  className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition ${
+                                    selected
+                                      ? 'border border-accent/40 bg-accent/15 text-accent'
+                                      : 'border border-black/10 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10'
+                                  } disabled:opacity-50`}
+                                >
+                                  {selected ? 'Active' : 'Activate'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(promptProfileDetail.versions || []).length === 0 && (
+                          <div className="text-xs text-slate-500 dark:text-slate-400">No stored versions yet (using fallback default).</div>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-black/10 bg-white/75 px-3 py-3 dark:border-white/10 dark:bg-slate-800/40">
+                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Create version</div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <input
+                            type="text"
+                            value={newPromptVersion.version_id}
+                            onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, version_id: e.target.value }))}
+                            placeholder="version_id (optional)"
+                            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                          />
+                          <input
+                            type="text"
+                            value={newPromptVersion.label}
+                            onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, label: e.target.value }))}
+                            placeholder="label"
+                            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                          />
+                        </div>
+                        <textarea
+                          value={newPromptVersion.system_prompt}
+                          onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, system_prompt: e.target.value }))}
+                          placeholder="system_prompt"
+                          rows={3}
+                          className="mt-2 w-full rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                        />
+                        <textarea
+                          value={newPromptVersion.user_template}
+                          onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, user_template: e.target.value }))}
+                          placeholder="user_template"
+                          rows={4}
+                          className="mt-2 w-full rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                        />
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                          <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={newPromptVersion.set_active}
+                              onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, set_active: e.target.checked }))}
+                              className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent/30 dark:border-white/20"
+                            />
+                            Set active after create
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const current = promptProfileDetail?.active;
+                                if (!current) return;
+                                setNewPromptVersion((prev) => ({
+                                  ...prev,
+                                  system_prompt: String(current.system_prompt || ''),
+                                  user_template: String(current.user_template || ''),
+                                  label: prev.label || `${current.label || current.id} copy`
+                                }));
+                              }}
+                              className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                            >
+                              Seed from active
+                            </button>
+                            <button
+                              type="button"
+                              onClick={createPromptVersion}
+                              disabled={promptMutationLoading}
+                              className="rounded-full bg-accent px-2.5 py-1 text-[10px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50"
+                            >
+                              {promptMutationLoading ? 'Saving...' : 'Create version'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
