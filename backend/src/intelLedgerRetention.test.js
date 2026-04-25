@@ -58,3 +58,51 @@ test('retention sweep purges stale session records', async () => {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('retention sweep hashes stale strict PII records when configured', async () => {
+  const tempDir = await mkdtemp(join(os.tmpdir(), 'mirabilis-retention-hash-'));
+  const storePath = join(tempDir, 'intelledger.json');
+  const storage = createIntelLedgerStorage(storePath);
+
+  try {
+    await storage.ensureStore();
+
+    const session = await storage.createSession('u-ret-hash', 'Retention Hash Session', 'desc');
+    const interaction = await storage.ingestInteraction(session.id, 'text', 'Call me at 415-555-0100', 'manual');
+    await storage.storeSignals(session.id, interaction.id, [{
+      signal_type: 'ask',
+      value: 'Call me at 415-555-0100',
+      quote: 'Call me at 415-555-0100',
+      confidence: 0.8,
+      owner: 'John Doe'
+    }]);
+
+    await storage.updateSessionRetentionPolicy(session.id, {
+      retention_days: 7,
+      pii_mode: 'strict',
+      pii_retention_action: 'hash'
+    });
+
+    const ninetyDaysAhead = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const result = await storage.runRetentionSweep(session.id, { now: ninetyDaysAhead });
+
+    assert.equal(result.pii_retention_action, 'hash');
+    assert.equal(result.hashed.interactions, 1);
+    assert.equal(result.hashed.signals, 1);
+    assert.equal(result.purged.interactions, 0);
+    assert.equal(result.purged.signals, 0);
+
+    const [interactions, signals] = await Promise.all([
+      storage.getInteractions(session.id),
+      storage.getSignalsBySession(session.id)
+    ]);
+
+    assert.equal(interactions.length, 1);
+    assert.equal(String(interactions[0].raw_content || '').startsWith('sha256:'), true);
+    assert.equal(signals.length, 1);
+    assert.equal(String(signals[0].value || '').startsWith('sha256:'), true);
+    assert.equal(String(signals[0].quote || '').startsWith('sha256:'), true);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

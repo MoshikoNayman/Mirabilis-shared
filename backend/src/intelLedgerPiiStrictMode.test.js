@@ -90,3 +90,44 @@ test('strict pii_mode redacts email and phone during text ingest', async () => {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('session export applies mask and hash redaction modes', async () => {
+  const tempDir = await mkdtemp(join(os.tmpdir(), 'mirabilis-pii-export-'));
+  const storePath = join(tempDir, 'intelledger.json');
+  const storage = createIntelLedgerStorage(storePath);
+  await storage.ensureStore();
+  const app = createApp(storage, storePath);
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const createSessionRes = await fetch(`${baseUrl}/api/intelledger/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'pii-export-user', title: 'PII export mode' })
+      });
+      assert.equal(createSessionRes.status, 200);
+      const sessionId = (await createSessionRes.json())?.session?.id;
+      assert.ok(sessionId);
+
+      await fetch(`${baseUrl}/api/intelledger/sessions/${sessionId}/ingest/text`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: 'Reach me at jane@example.com and 415-555-0101.' })
+      });
+
+      const maskedRes = await fetch(`${baseUrl}/api/intelledger/sessions/${sessionId}/export?redaction_mode=mask`);
+      assert.equal(maskedRes.status, 200);
+      const maskedPayload = await maskedRes.json();
+      const maskedRaw = String(maskedPayload?.export?.interactions?.[0]?.raw_content || '');
+      assert.equal(maskedRaw, '[REDACTED]');
+
+      const hashedRes = await fetch(`${baseUrl}/api/intelledger/sessions/${sessionId}/export?redaction_mode=hash`);
+      assert.equal(hashedRes.status, 200);
+      const hashedPayload = await hashedRes.json();
+      const hashedRaw = String(hashedPayload?.export?.interactions?.[0]?.raw_content || '');
+      assert.equal(hashedRaw.startsWith('sha256:'), true);
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

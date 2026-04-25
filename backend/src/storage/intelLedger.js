@@ -3,7 +3,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 const empty = () => ({
   sessions: [],
@@ -198,6 +198,12 @@ function normalizePromptProfileId(value) {
 function normalizePromptVersionId(value) {
   const cleaned = String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '_').replace(/_+/g, '_');
   return cleaned.slice(0, 80) || null;
+}
+
+function hashPiiValue(value) {
+  const source = String(value || '').trim();
+  if (!source) return '';
+  return `sha256:${createHash('sha256').update(source).digest('hex')}`;
 }
 
 function normalizeEntityKey(value) {
@@ -552,6 +558,7 @@ export function createIntelLedgerStorage(filePath) {
           semantic_terms: semanticTokens(`${title || ''} ${description || ''}`).slice(0, 24),
           retention_days: null,
           pii_mode: 'standard',
+          pii_retention_action: 'purge',
           archived: false,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -605,6 +612,14 @@ export function createIntelLedgerStorage(filePath) {
           const allowed = new Set(['standard', 'strict']);
           if (allowed.has(nextPiiMode)) {
             session.pii_mode = nextPiiMode;
+          }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(policy, 'pii_retention_action')) {
+          const nextAction = String(policy.pii_retention_action || '').trim().toLowerCase();
+          const allowedActions = new Set(['purge', 'hash']);
+          if (allowedActions.has(nextAction)) {
+            session.pii_retention_action = nextAction;
           }
         }
 
@@ -684,9 +699,54 @@ export function createIntelLedgerStorage(filePath) {
           signal_feedback: store.signal_feedback.length
         };
 
-        store.interactions = store.interactions.filter((item) => !(item.session_id === sessionId && staleInteractionIds.has(item.id)));
-        store.signals = store.signals.filter((item) => !(item.session_id === sessionId && staleSignalIds.has(item.id)));
-        store.syntheses = store.syntheses.filter((item) => !(item.session_id === sessionId && new Date(item.created_at || 0).getTime() < cutoffMs));
+        const hashed = {
+          interactions: 0,
+          signals: 0,
+          syntheses: 0
+        };
+
+        const shouldHashStalePii = String(session.pii_mode || 'standard') === 'strict'
+          && String(session.pii_retention_action || 'purge') === 'hash';
+
+        if (shouldHashStalePii) {
+          for (const interaction of store.interactions) {
+            if (interaction.session_id !== sessionId || !staleInteractionIds.has(interaction.id)) continue;
+            interaction.raw_content = hashPiiValue(interaction.raw_content);
+            interaction.transcript_summary = hashPiiValue(interaction.transcript_summary);
+            interaction.transcript_segments = [];
+            interaction.redacted_at = new Date(now).toISOString();
+            interaction.redaction_mode = 'hash';
+            hashed.interactions += 1;
+          }
+
+          for (const signal of store.signals) {
+            if (signal.session_id !== sessionId || !staleSignalIds.has(signal.id)) continue;
+            signal.value = hashPiiValue(signal.value);
+            signal.quote = hashPiiValue(signal.quote);
+            signal.owner = signal.owner ? hashPiiValue(signal.owner) : null;
+            signal.ask = signal.ask ? hashPiiValue(signal.ask) : null;
+            signal.commitment = signal.commitment ? hashPiiValue(signal.commitment) : null;
+            signal.risk = signal.risk ? hashPiiValue(signal.risk) : null;
+            signal.decision = signal.decision ? hashPiiValue(signal.decision) : null;
+            signal.redacted_at = new Date(now).toISOString();
+            signal.redaction_mode = 'hash';
+            hashed.signals += 1;
+          }
+
+          for (const synthesis of store.syntheses) {
+            if (synthesis.session_id !== sessionId || new Date(synthesis.created_at || 0).getTime() >= cutoffMs) continue;
+            synthesis.content = hashPiiValue(synthesis.content);
+            synthesis.redacted_at = new Date(now).toISOString();
+            synthesis.redaction_mode = 'hash';
+            hashed.syntheses += 1;
+          }
+        }
+
+        if (!shouldHashStalePii) {
+          store.interactions = store.interactions.filter((item) => !(item.session_id === sessionId && staleInteractionIds.has(item.id)));
+          store.signals = store.signals.filter((item) => !(item.session_id === sessionId && staleSignalIds.has(item.id)));
+          store.syntheses = store.syntheses.filter((item) => !(item.session_id === sessionId && new Date(item.created_at || 0).getTime() < cutoffMs));
+        }
         store.actions = store.actions.filter((item) => !(item.session_id === sessionId && staleActionIds.has(item.id)));
         store.jobs = store.jobs.filter((item) => !(item.session_id === sessionId && new Date(item.created_at || 0).getTime() < cutoffMs));
         store.entities = store.entities.filter((item) => !(item.session_id === sessionId && staleEntityIds.has(item.id)));
@@ -722,7 +782,9 @@ export function createIntelLedgerStorage(filePath) {
         return {
           session_id: sessionId,
           retention_days: days,
+          pii_retention_action: shouldHashStalePii ? 'hash' : 'purge',
           cutoff_at: cutoffIso,
+          hashed,
           purged: {
             interactions: before.interactions - after.interactions,
             signals: before.signals - after.signals,

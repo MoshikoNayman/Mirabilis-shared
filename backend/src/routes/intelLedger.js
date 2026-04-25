@@ -112,6 +112,20 @@ function applyPiiPolicy(content, piiMode) {
   return redactSensitiveContent(content);
 }
 
+function hashExportValue(value) {
+  const source = String(value || '').trim();
+  if (!source) return '';
+  return `sha256:${createHash('sha256').update(source).digest('hex')}`;
+}
+
+function redactExportField(value, mode) {
+  const normalizedMode = String(mode || 'none').toLowerCase();
+  if (normalizedMode === 'none') return value;
+  if (normalizedMode === 'mask') return '[REDACTED]';
+  if (normalizedMode === 'hash') return hashExportValue(value);
+  return value;
+}
+
 async function generateSessionTitle({ content, provider, model, config, streamWithProvider }) {
   const snippet = String(content || '').trim().slice(0, 500);
   if (!snippet) return null;
@@ -1332,10 +1346,11 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       if (typeof storage.updateSessionRetentionPolicy !== 'function') {
         return res.status(501).json({ error: 'Retention policy updates are not supported by this storage backend.' });
       }
-      const { retention_days, pii_mode } = req.body || {};
+      const { retention_days, pii_mode, pii_retention_action } = req.body || {};
       const session = await storage.updateSessionRetentionPolicy(req.params.sessionId, {
         retention_days,
-        pii_mode
+        pii_mode,
+        pii_retention_action
       });
       if (!session) return res.status(404).json({ error: 'Not found' });
       return res.json({ session });
@@ -1568,6 +1583,61 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       const interactions = await storage.getInteractions(req.params.sessionId);
       res.json({ interactions });
     } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get('/sessions/:sessionId/export', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const session = await storage.getSession(sessionId);
+      if (!session) return res.status(404).json({ error: 'Not found' });
+
+      const requestedMode = String(req.query?.redaction_mode || req.query?.redactionMode || '').toLowerCase();
+      const defaultMode = String(session.pii_mode || '').toLowerCase() === 'strict' ? 'mask' : 'none';
+      const redactionMode = ['none', 'mask', 'hash'].includes(requestedMode) ? requestedMode : defaultMode;
+
+      const [interactions, signals, syntheses, actions] = await Promise.all([
+        storage.getInteractions(sessionId),
+        storage.getSignalsBySession(sessionId),
+        storage.getSynthesisBySession(sessionId),
+        storage.getActionsBySession(sessionId)
+      ]);
+
+      const redactedInteractions = interactions.map((item) => ({
+        ...item,
+        raw_content: redactExportField(item.raw_content, redactionMode),
+        transcript_summary: redactExportField(item.transcript_summary, redactionMode),
+        transcript_segments: redactionMode === 'none' ? item.transcript_segments : []
+      }));
+
+      const redactedSignals = signals.map((item) => ({
+        ...item,
+        value: redactExportField(item.value, redactionMode),
+        quote: redactExportField(item.quote, redactionMode),
+        owner: item.owner ? redactExportField(item.owner, redactionMode) : item.owner,
+        ask: item.ask ? redactExportField(item.ask, redactionMode) : item.ask,
+        commitment: item.commitment ? redactExportField(item.commitment, redactionMode) : item.commitment,
+        risk: item.risk ? redactExportField(item.risk, redactionMode) : item.risk,
+        decision: item.decision ? redactExportField(item.decision, redactionMode) : item.decision
+      }));
+
+      const redactedSyntheses = syntheses.map((item) => ({
+        ...item,
+        content: redactExportField(item.content, redactionMode)
+      }));
+
+      res.json({
+        export: {
+          session,
+          redaction_mode: redactionMode,
+          interactions: redactedInteractions,
+          signals: redactedSignals,
+          syntheses: redactedSyntheses,
+          actions
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.get('/sessions/:sessionId/jobs', async (req, res) => {
