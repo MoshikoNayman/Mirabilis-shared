@@ -22,5 +22,8 @@ export const config = {
   tavilySearchDepth: process.env.TAVILY_SEARCH_DEPTH || 'advanced',
   chatStorePath: process.env.DATA_DIR
     ? path.join(process.env.DATA_DIR, 'chats.json')
-    : path.resolve(__dirname, '../data/chats.json')
+    : path.resolve(__dirname, '../data/chats.json'),
+  intelLedgerStorePath: process.env.DATA_DIR
+    ? path.join(process.env.DATA_DIR, 'intelledger.json')
+    : path.resolve(__dirname, '../data/intelledger.json')
 };
