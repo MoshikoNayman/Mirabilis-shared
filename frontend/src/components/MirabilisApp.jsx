@@ -241,6 +241,10 @@ function IntelLedgerApp({ userId }) {
   const [crossSynthesis, setCrossSynthesis] = useState(null); // { loading, result, error, sessionCount }
   const [todayDigest, setTodayDigest] = useState(null);
   const [digestLoading, setDigestLoading] = useState(false);
+  const [auditOverview, setAuditOverview] = useState(null);
+  const [auditTenantRollup, setAuditTenantRollup] = useState([]);
+  const [auditOverviewLoading, setAuditOverviewLoading] = useState(false);
+  const [auditLastUpdatedAt, setAuditLastUpdatedAt] = useState('');
 
   const toggleSelect = (id) => {
     setSelectedSessions((prev) => {
@@ -298,6 +302,41 @@ function IntelLedgerApp({ userId }) {
       setTodayDigest(null);
     } finally {
       setDigestLoading(false);
+    }
+  };
+
+  const loadAuditOverview = async () => {
+    if (!userId) {
+      setAuditOverview(null);
+      setAuditTenantRollup([]);
+      return;
+    }
+
+    setAuditOverviewLoading(true);
+    try {
+      const [summaryRes, trendsRes, tenantRes] = await Promise.all([
+        fetch(`${API_BASE}/api/intelledger/audit/summary?userId=${encodeURIComponent(userId)}&since_hours=168&limit=2000`),
+        fetch(`${API_BASE}/api/intelledger/audit/trends?userId=${encodeURIComponent(userId)}`),
+        fetch(`${API_BASE}/api/intelledger/audit/trends/tenants?userId=${encodeURIComponent(userId)}&topN=10`)
+      ]);
+
+      const [summaryPayload, trendsPayload, tenantPayload] = await Promise.all([
+        readJsonOrThrow(summaryRes, 'Failed to load audit summary.'),
+        readJsonOrThrow(trendsRes, 'Failed to load audit trends.'),
+        readJsonOrThrow(tenantRes, 'Failed to load tenant audit trends.')
+      ]);
+
+      setAuditOverview({
+        summary: summaryPayload?.summary || null,
+        trends: trendsPayload?.trends || null
+      });
+      setAuditTenantRollup(Array.isArray(tenantPayload?.rollup) ? tenantPayload.rollup : []);
+      setAuditLastUpdatedAt(new Date().toISOString());
+    } catch {
+      setAuditOverview(null);
+      setAuditTenantRollup([]);
+    } finally {
+      setAuditOverviewLoading(false);
     }
   };
 
@@ -442,6 +481,9 @@ function IntelLedgerApp({ userId }) {
     const localSessions = readLocalSessions(userId);
     setSessions(localSessions);
     setTodayDigest(null);
+    setAuditOverview(null);
+    setAuditTenantRollup([]);
+    setAuditLastUpdatedAt('');
     setLocalMode(true);
   };
 
@@ -452,7 +494,10 @@ function IntelLedgerApp({ userId }) {
       const res = await fetch(`${API_BASE}/api/intelledger/sessions?userId=${encodeURIComponent(userId)}`);
       const { sessions } = await readJsonOrThrow(res, 'Failed to load InteLedger sessions.');
       setSessions(sessions);
-      await loadTodayDigest(sessions);
+      await Promise.all([
+        loadTodayDigest(sessions),
+        loadAuditOverview()
+      ]);
       setSemanticSessions([]);
       setLocalMode(false);
     } catch (err) {
@@ -713,6 +758,91 @@ function IntelLedgerApp({ userId }) {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!localMode && (auditOverviewLoading || auditOverview) && (
+          <div className="rounded-2xl border border-black/10 bg-white/75 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
+            {auditOverviewLoading ? (
+              <div className="text-xs text-slate-500 dark:text-slate-400">Loading audit overview...</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Audit overview</span>
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Events 24h {auditOverview?.trends?.event_count_24h || 0}</span>
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Events 7d {auditOverview?.trends?.event_count_7d || 0}</span>
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Events 30d {auditOverview?.trends?.event_count_30d || 0}</span>
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Event types (7d) {(auditOverview?.summary?.event_types || []).length}</span>
+                  {auditLastUpdatedAt ? (
+                    <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                      Updated {new Date(auditLastUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+                  <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/35">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">7-day trend</div>
+                    {Array.isArray(auditOverview?.trends?.daily_7) && auditOverview.trends.daily_7.length > 0 ? (
+                      <div>
+                        <div className="flex h-14 items-end gap-1">
+                          {auditOverview.trends.daily_7.map((bucket) => {
+                            const maxCount = Math.max(...auditOverview.trends.daily_7.map((item) => Number(item.count || 0)), 1);
+                            const height = Math.max(3, Math.round((Number(bucket.count || 0) / maxCount) * 100));
+                            return (
+                              <div
+                                key={bucket.date}
+                                title={`${bucket.date}: ${bucket.count}`}
+                                className="flex-1 rounded-sm bg-accent/50"
+                                style={{ height: `${height}%` }}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                          <span>{auditOverview.trends.daily_7[0]?.date?.slice(5) || ''}</span>
+                          <span>today</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500 dark:text-slate-400">No trend data available yet.</div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/35">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Top event types (24h)</div>
+                    {Array.isArray(auditOverview?.trends?.top_types_24h) && auditOverview.trends.top_types_24h.length > 0 ? (
+                      <ul className="space-y-1">
+                        {auditOverview.trends.top_types_24h.slice(0, 5).map((item) => (
+                          <li key={item.event_type} className="flex items-center justify-between gap-2 text-[11px]">
+                            <span className="truncate text-slate-600 dark:text-slate-300">{String(item.event_type || '').replace(/\./g, ' › ')}</span>
+                            <span className="font-semibold text-slate-700 dark:text-slate-200">{item.count}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-xs text-slate-500 dark:text-slate-400">No events in the last 24h.</div>
+                    )}
+                  </div>
+                </div>
+
+                {auditTenantRollup.length > 0 && (
+                  <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/35">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Tenant audit rollup</div>
+                    <div className="space-y-1.5">
+                      {auditTenantRollup.slice(0, 3).map((tenant) => (
+                        <div key={tenant.tenant_id || 'tenant'} className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                          <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">{tenant.tenant_id || 'tenant'}</span>
+                          <span>24h {tenant.count_24h || 0}</span>
+                          <span>7d {tenant.count_7d || 0}</span>
+                          <span>30d {tenant.count_30d || 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
