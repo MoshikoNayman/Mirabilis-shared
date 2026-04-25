@@ -702,6 +702,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     if (redisRateInitPromise) return redisRateInitPromise;
 
     redisRateInitPromise = (async () => {
+      let client = null;
       try {
         if (!configuredRateLimitRedisUrl) {
           throw new Error('INTELLEDGER_RATE_LIMIT_REDIS_URL is required when INTELLEDGER_RATE_LIMIT_STORE=redis');
@@ -713,7 +714,13 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
           throw new Error('redis client module is unavailable');
         }
 
-        const client = createClient({ url: configuredRateLimitRedisUrl });
+        client = createClient({
+          url: configuredRateLimitRedisUrl,
+          socket: {
+            connectTimeout: 500,
+            reconnectStrategy: () => false
+          }
+        });
         client.on('error', (err) => {
           if (!rateLimitWarned) {
             rateLimitWarned = true;
@@ -725,6 +732,13 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         redisRateClient = client;
         return redisRateClient;
       } catch (err) {
+        if (client) {
+          try {
+            client.disconnect();
+          } catch {
+            // no-op cleanup after failed connect
+          }
+        }
         if (!rateLimitWarned) {
           rateLimitWarned = true;
           console.warn(`[InteLedger] Redis rate limiter unavailable, using in-memory fallback: ${err?.message || err}`);
@@ -878,6 +892,109 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       });
 
       return res.json({ events });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/audit/summary', async (req, res) => {
+    try {
+      if (typeof storage.getAuditEvents !== 'function') {
+        return res.status(501).json({ error: 'Audit events are not supported by this storage backend.' });
+      }
+
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+      if (!identity.userId && !identity.trustedUserId && !identity.tenantId) {
+        return res.status(400).json({ error: 'userId or tenant context is required.' });
+      }
+
+      const limit = Math.max(100, Math.min(Number(req.query?.limit || 2000) || 2000, 5000));
+      const sinceHours = Math.max(1, Math.min(Number(req.query?.since_hours || req.query?.sinceHours || 24) || 24, 24 * 90));
+      const sessionId = req.query?.session_id || req.query?.sessionId;
+      const eventType = req.query?.event_type || req.query?.eventType;
+      const sourceIp = req.query?.source_ip || req.query?.sourceIp;
+
+      let actorUserId = req.query?.actor_user_id || req.query?.actorUserId || null;
+      let actorTenantId = req.query?.actor_tenant_id || req.query?.actorTenantId || null;
+
+      if (identity.trustedUserId) {
+        if (actorUserId && String(actorUserId) !== identity.trustedUserId) {
+          return res.status(403).json({ error: 'actor_user_id does not match authenticated context.' });
+        }
+        actorUserId = identity.trustedUserId;
+      } else if (!actorUserId && identity.userId) {
+        actorUserId = identity.userId;
+      }
+
+      if (identity.trustedTenantId) {
+        if (actorTenantId && String(actorTenantId) !== identity.trustedTenantId) {
+          return res.status(403).json({ error: 'actor_tenant_id does not match authenticated context.' });
+        }
+        actorTenantId = identity.trustedTenantId;
+      } else if (!actorTenantId && identity.tenantId) {
+        actorTenantId = identity.tenantId;
+      }
+
+      const allEvents = await storage.getAuditEvents({
+        limit,
+        sessionId,
+        eventType,
+        actorUserId,
+        actorTenantId,
+        sourceIp
+      });
+
+      const sinceMs = Date.now() - (sinceHours * 60 * 60 * 1000);
+      const events = allEvents.filter((item) => {
+        const ts = new Date(item.created_at || 0).getTime();
+        return Number.isFinite(ts) && ts >= sinceMs;
+      });
+
+      const byType = new Map();
+      const byDay = new Map();
+      const byActor = new Map();
+      const sessionIds = new Set();
+
+      for (const event of events) {
+        const eventKey = String(event.event_type || 'unknown');
+        byType.set(eventKey, (byType.get(eventKey) || 0) + 1);
+
+        const dayKey = String(event.created_at || '').slice(0, 10) || 'unknown';
+        byDay.set(dayKey, (byDay.get(dayKey) || 0) + 1);
+
+        const actorKey = String(event.actor_user_id || 'unknown');
+        byActor.set(actorKey, (byActor.get(actorKey) || 0) + 1);
+
+        if (event.session_id) sessionIds.add(String(event.session_id));
+      }
+
+      const eventTypes = Array.from(byType.entries())
+        .map(([event_type, count]) => ({ event_type, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 20);
+
+      const daily = Array.from(byDay.entries())
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+
+      const actors = Array.from(byActor.entries())
+        .map(([actor_user_id, count]) => ({ actor_user_id, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 20);
+
+      return res.json({
+        summary: {
+          since_hours: sinceHours,
+          sampled_limit: limit,
+          sampled_events: allEvents.length,
+          event_count: events.length,
+          unique_sessions: sessionIds.size,
+          event_types: eventTypes,
+          daily,
+          actors
+        }
+      });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

@@ -1325,7 +1325,7 @@ export function createIntelLedgerStorage(filePath) {
 
     async getAuditEvents(options = {}) {
       const store = await get();
-      const limit = Math.max(1, Math.min(Number(options.limit || 100) || 100, 500));
+      const limit = Math.max(1, Math.min(Number(options.limit || 100) || 100, 5000));
       const sessionId = options.sessionId ? String(options.sessionId) : null;
       const eventType = options.eventType ? String(options.eventType) : null;
       const actorUserId = options.actorUserId ? String(options.actorUserId) : null;

@@ -151,6 +151,20 @@ test('hardening guardrails enforce payload limits and record policy audit events
       assert.ok(globalAuditPayload.events.length >= 1);
       assert.equal(globalAuditPayload.events[0].event_type, 'session.retention_run_executed');
       assert.equal(globalAuditPayload.events[0].session_id, sessionA.id);
+
+      const missingSummaryIdentity = await fetch(`${baseUrl}/api/intelledger/audit/summary`);
+      assert.equal(missingSummaryIdentity.status, 400);
+
+      const auditSummary = await fetch(
+        `${baseUrl}/api/intelledger/audit/summary?userId=hardening-user&since_hours=48&limit=2000`
+      );
+      assert.equal(auditSummary.status, 200);
+      const summaryPayload = await auditSummary.json();
+      assert.ok(summaryPayload?.summary);
+      assert.ok(typeof summaryPayload.summary.event_count === 'number');
+      assert.ok(Array.isArray(summaryPayload.summary.event_types));
+      assert.ok(summaryPayload.summary.event_types.some((item) => item.event_type === 'session.retention_run_executed'));
+      assert.ok(Array.isArray(summaryPayload.summary.daily));
     });
   } finally {
     if (previousEnv.INTELLEDGER_MAX_TEXT_INGEST_CHARS === undefined) delete process.env.INTELLEDGER_MAX_TEXT_INGEST_CHARS;
