@@ -198,7 +198,7 @@ export default function MirabilisApp() {
       </div>
 
       {/* Content area */}
-      <div className="h-full w-full overflow-hidden">
+      <div className={`h-full w-full overflow-hidden ${activeTab === 'intel' ? 'pb-7 sm:pb-8' : ''}`}>
         {activeTab === 'chat' && (
           <AppErrorBoundary>
             <ChatApp />
@@ -726,7 +726,7 @@ function IntelLedgerApp({ userId }) {
 
   return (
     <>
-    <main className="relative h-full w-full p-3 sm:p-4">
+    <main className="relative h-full w-full overflow-hidden p-3 pb-8 sm:p-4 sm:pb-10">
       <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-4 sm:p-4">
         <div className="grid gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
           <div className="space-y-2">
@@ -740,9 +740,6 @@ function IntelLedgerApp({ userId }) {
                   embedded mode
                 </span>
               </div>
-              <p className="text-xs leading-5 text-slate-600 dark:text-slate-400">
-                Capture context, extract signals, and move to next actions quickly.
-              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5">
