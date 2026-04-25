@@ -124,6 +124,14 @@ test('hardening guardrails enforce payload limits and record policy audit events
       const eventTypes = new Set(auditPayload.events.map((item) => item.event_type));
       assert.equal(eventTypes.has('session.retention_policy_updated'), true);
       assert.equal(eventTypes.has('session.retention_run_executed'), true);
+
+      const filteredAudit = await fetch(
+        `${baseUrl}/api/intelledger/sessions/${sessionA.id}/audit?event_type=session.retention_run_executed`
+      );
+      assert.equal(filteredAudit.status, 200);
+      const filteredAuditPayload = await filteredAudit.json();
+      assert.equal(filteredAuditPayload.events.length, 1);
+      assert.equal(filteredAuditPayload.events[0].event_type, 'session.retention_run_executed');
     });
   } finally {
     if (previousEnv.INTELLEDGER_MAX_TEXT_INGEST_CHARS === undefined) delete process.env.INTELLEDGER_MAX_TEXT_INGEST_CHARS;
@@ -135,6 +143,53 @@ test('hardening guardrails enforce payload limits and record policy audit events
     if (previousEnv.INTELLEDGER_MAX_CROSS_SYNTH_SESSIONS === undefined) delete process.env.INTELLEDGER_MAX_CROSS_SYNTH_SESSIONS;
     else process.env.INTELLEDGER_MAX_CROSS_SYNTH_SESSIONS = previousEnv.INTELLEDGER_MAX_CROSS_SYNTH_SESSIONS;
 
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('rate limit guard returns 429 after configured retention-run threshold', async () => {
+  const tempDir = await mkdtemp(join(os.tmpdir(), 'mirabilis-hardening-ratelimit-'));
+  const storePath = join(tempDir, 'intelledger.json');
+  const storage = createIntelLedgerStorage(storePath);
+  await storage.ensureStore();
+  const app = createApp(storage, storePath);
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const createSession = await fetch(`${baseUrl}/api/intelledger/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'ratelimit-user', title: 'Rate Limit Session' })
+      });
+      assert.equal(createSession.status, 200);
+      const session = (await createSession.json())?.session;
+      assert.ok(session?.id);
+
+      for (let i = 0; i < 12; i += 1) {
+        const run = await fetch(`${baseUrl}/api/intelledger/sessions/${session.id}/retention/run`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-user-id': 'ratelimit-user'
+          },
+          body: JSON.stringify({ retention_days: 7 })
+        });
+        assert.equal(run.status, 200);
+      }
+
+      const throttled = await fetch(`${baseUrl}/api/intelledger/sessions/${session.id}/retention/run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-user-id': 'ratelimit-user'
+        },
+        body: JSON.stringify({ retention_days: 7 })
+      });
+      assert.equal(throttled.status, 429);
+      const payload = await throttled.json();
+      assert.match(String(payload?.error || ''), /rate limit exceeded/i);
+    });
+  } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 });

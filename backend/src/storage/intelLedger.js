@@ -1328,11 +1328,17 @@ export function createIntelLedgerStorage(filePath) {
       const limit = Math.max(1, Math.min(Number(options.limit || 100) || 100, 500));
       const sessionId = options.sessionId ? String(options.sessionId) : null;
       const eventType = options.eventType ? String(options.eventType) : null;
+      const actorUserId = options.actorUserId ? String(options.actorUserId) : null;
+      const actorTenantId = options.actorTenantId ? String(options.actorTenantId) : null;
+      const sourceIp = options.sourceIp ? String(options.sourceIp) : null;
 
       return store.audit_events
         .filter((item) => {
           if (sessionId && item.session_id !== sessionId) return false;
           if (eventType && item.event_type !== eventType) return false;
+          if (actorUserId && item.actor_user_id !== actorUserId) return false;
+          if (actorTenantId && item.actor_tenant_id !== actorTenantId) return false;
+          if (sourceIp && item.source_ip !== sourceIp) return false;
           return true;
         })
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))

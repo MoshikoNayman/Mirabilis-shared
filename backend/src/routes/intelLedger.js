@@ -1679,7 +1679,18 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         return res.status(501).json({ error: 'Audit events are not supported by this storage backend.' });
       }
       const limit = Number(req.query?.limit || 100);
-      const events = await storage.getAuditEvents({ sessionId: req.params.sessionId, limit });
+      const eventType = req.query?.event_type || req.query?.eventType;
+      const actorUserId = req.query?.actor_user_id || req.query?.actorUserId;
+      const actorTenantId = req.query?.actor_tenant_id || req.query?.actorTenantId;
+      const sourceIp = req.query?.source_ip || req.query?.sourceIp;
+      const events = await storage.getAuditEvents({
+        sessionId: req.params.sessionId,
+        limit,
+        eventType,
+        actorUserId,
+        actorTenantId,
+        sourceIp
+      });
       return res.json({ events });
     } catch (err) {
       return res.status(500).json({ error: err.message });
