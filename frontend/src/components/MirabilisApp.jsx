@@ -971,15 +971,34 @@ function IntelLedgerApp({ userId }) {
                 {auditTenantRollup.length > 0 && (
                   <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/35">
                     <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Tenant audit rollup</div>
-                    <div className="space-y-1.5">
-                      {auditTenantRollup.slice(0, 3).map((tenant) => (
-                        <div key={tenant.tenant_id || 'tenant'} className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
-                          <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">{tenant.tenant_id || 'tenant'}</span>
-                          <span>24h {tenant.count_24h || 0}</span>
-                          <span>7d {tenant.count_7d || 0}</span>
-                          <span>30d {tenant.count_30d || 0}</span>
-                        </div>
-                      ))}
+                    <div className="space-y-2">
+                      {(() => {
+                        const topTenants = auditTenantRollup.slice(0, 5);
+                        const max30d = Math.max(...topTenants.map((item) => Number(item.count_30d || 0)), 1);
+                        return topTenants.map((tenant) => {
+                          const widthPct = Math.max(4, Math.round((Number(tenant.count_30d || 0) / max30d) * 100));
+                          return (
+                            <div key={tenant.tenant_id || 'tenant'} className="rounded-lg border border-black/10 bg-white/80 px-2.5 py-2 dark:border-white/10 dark:bg-slate-800/40">
+                              <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                                <span className="truncate font-medium">{tenant.tenant_id || 'tenant'}</span>
+                                <span>30d {tenant.count_30d || 0}</span>
+                              </div>
+                              <div className="mb-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+                                <div className="h-full rounded-full bg-accent/65" style={{ width: `${widthPct}%` }} />
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                                <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">24h {tenant.count_24h || 0}</span>
+                                <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">7d {tenant.count_7d || 0}</span>
+                                {(tenant.top_types || []).slice(0, 2).map((type) => (
+                                  <span key={`${tenant.tenant_id}-${type.event_type}`} className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                                    {String(type.event_type || '').replace(/\./g, ' › ')} ({type.count || 0})
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 )}
