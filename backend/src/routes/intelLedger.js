@@ -762,6 +762,59 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   const getSessionTenantId = (session) => String(session?.tenant_id || session?.user_id || 'default').trim();
 
+  router.get('/audit/events', async (req, res) => {
+    try {
+      if (typeof storage.getAuditEvents !== 'function') {
+        return res.status(501).json({ error: 'Audit events are not supported by this storage backend.' });
+      }
+
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+      if (!identity.userId && !identity.trustedUserId && !identity.tenantId) {
+        return res.status(400).json({ error: 'userId or tenant context is required.' });
+      }
+
+      const limit = Number(req.query?.limit || 100);
+      const sessionId = req.query?.session_id || req.query?.sessionId;
+      const eventType = req.query?.event_type || req.query?.eventType;
+      const sourceIp = req.query?.source_ip || req.query?.sourceIp;
+
+      let actorUserId = req.query?.actor_user_id || req.query?.actorUserId || null;
+      let actorTenantId = req.query?.actor_tenant_id || req.query?.actorTenantId || null;
+
+      if (identity.trustedUserId) {
+        if (actorUserId && String(actorUserId) !== identity.trustedUserId) {
+          return res.status(403).json({ error: 'actor_user_id does not match authenticated context.' });
+        }
+        actorUserId = identity.trustedUserId;
+      } else if (!actorUserId && identity.userId) {
+        actorUserId = identity.userId;
+      }
+
+      if (identity.trustedTenantId) {
+        if (actorTenantId && String(actorTenantId) !== identity.trustedTenantId) {
+          return res.status(403).json({ error: 'actor_tenant_id does not match authenticated context.' });
+        }
+        actorTenantId = identity.trustedTenantId;
+      } else if (!actorTenantId && identity.tenantId) {
+        actorTenantId = identity.tenantId;
+      }
+
+      const events = await storage.getAuditEvents({
+        limit,
+        sessionId,
+        eventType,
+        actorUserId,
+        actorTenantId,
+        sourceIp
+      });
+
+      return res.json({ events });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   router.use('/sessions/:sessionId', async (req, res, next) => {
     try {
       const identity = resolveIdentity(req);

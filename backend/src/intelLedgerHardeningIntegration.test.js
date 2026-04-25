@@ -104,14 +104,20 @@ test('hardening guardrails enforce payload limits and record policy audit events
 
       const updatePolicy = await fetch(`${baseUrl}/api/intelledger/sessions/${sessionA.id}/retention`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'x-user-id': 'hardening-user'
+        },
         body: JSON.stringify({ retention_days: 5, pii_mode: 'strict', pii_retention_action: 'hash' })
       });
       assert.equal(updatePolicy.status, 200);
 
       const runPolicy = await fetch(`${baseUrl}/api/intelledger/sessions/${sessionA.id}/retention/run`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'x-user-id': 'hardening-user'
+        },
         body: JSON.stringify({ retention_days: 5 })
       });
       assert.equal(runPolicy.status, 200);
@@ -132,6 +138,19 @@ test('hardening guardrails enforce payload limits and record policy audit events
       const filteredAuditPayload = await filteredAudit.json();
       assert.equal(filteredAuditPayload.events.length, 1);
       assert.equal(filteredAuditPayload.events[0].event_type, 'session.retention_run_executed');
+
+      const missingIdentity = await fetch(`${baseUrl}/api/intelledger/audit/events`);
+      assert.equal(missingIdentity.status, 400);
+
+      const globalAudit = await fetch(
+        `${baseUrl}/api/intelledger/audit/events?userId=hardening-user&event_type=session.retention_run_executed&limit=10`
+      );
+      assert.equal(globalAudit.status, 200);
+      const globalAuditPayload = await globalAudit.json();
+      assert.ok(Array.isArray(globalAuditPayload?.events));
+      assert.ok(globalAuditPayload.events.length >= 1);
+      assert.equal(globalAuditPayload.events[0].event_type, 'session.retention_run_executed');
+      assert.equal(globalAuditPayload.events[0].session_id, sessionA.id);
     });
   } finally {
     if (previousEnv.INTELLEDGER_MAX_TEXT_INGEST_CHARS === undefined) delete process.env.INTELLEDGER_MAX_TEXT_INGEST_CHARS;
