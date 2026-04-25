@@ -4422,7 +4422,7 @@ export default function ChatApp() {
                       setIsProviderConfigOpen(false);
                       if (installingBinary?.done) setInstallingBinary(null);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="Choose provider"
                   >
                     <span className="max-w-[9rem] truncate">{PROVIDER_OPTIONS.find((opt) => opt.id === provider)?.label || provider}</span>
@@ -4662,7 +4662,7 @@ export default function ChatApp() {
                     type="button"
                     data-menu-trigger="model"
                     onClick={() => { setIsProviderMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsModelMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="Choose model"
                   >
                     <span className="max-w-[9rem] truncate">
@@ -4879,7 +4879,7 @@ export default function ChatApp() {
                     type="button"
                       data-menu-trigger="training"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsTrainingMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="Training options"
                   >
                     Training
@@ -4985,7 +4985,7 @@ export default function ChatApp() {
                     type="button"
                       data-menu-trigger="tools"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsToolsMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="Open tools"
                   >
                     Tools
@@ -5060,7 +5060,7 @@ export default function ChatApp() {
                     type="button"
                     data-menu-trigger="control"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsControlPanelOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="Remote Control"
                   >
                     {/* Green dot indicator */}
@@ -5175,7 +5175,7 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={toggleUncensoredMode}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
                       uncensoredMode
                         ? 'border-emerald-300/60 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-400/40 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30'
                         : 'border-black/10 bg-white/80 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10'
@@ -5191,7 +5191,7 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={toggleOpenClawMode}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
                       openClawMode
                         ? 'border-rose-300/60 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-400/40 dark:bg-rose-900/20 dark:text-rose-300 dark:hover:bg-rose-900/30'
                         : 'border-black/10 bg-white/80 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10'
@@ -5227,7 +5227,7 @@ export default function ChatApp() {
                       setIsVoiceMenuOpen(false);
                       setIsMcpPanelOpen((prev) => !prev);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
                     title="MCP Connector"
                   >
                     <span className={`h-2 w-2 rounded-full ${selectedMcpServer ? 'bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.45)]' : 'bg-transparent border border-slate-400/40'}`} />
