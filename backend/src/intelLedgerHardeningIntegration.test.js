@@ -165,6 +165,32 @@ test('hardening guardrails enforce payload limits and record policy audit events
       assert.ok(Array.isArray(summaryPayload.summary.event_types));
       assert.ok(summaryPayload.summary.event_types.some((item) => item.event_type === 'session.retention_run_executed'));
       assert.ok(Array.isArray(summaryPayload.summary.daily));
+
+      // audit trends endpoint
+      const missingTrendsIdentity = await fetch(`${baseUrl}/api/intelledger/audit/trends`);
+      assert.equal(missingTrendsIdentity.status, 400);
+
+      const auditTrends = await fetch(
+        `${baseUrl}/api/intelledger/audit/trends?userId=hardening-user`
+      );
+      assert.equal(auditTrends.status, 200);
+      const trendsPayload = await auditTrends.json();
+      assert.ok(trendsPayload?.trends);
+      assert.ok(Array.isArray(trendsPayload.trends.hourly));
+      assert.equal(trendsPayload.trends.hourly.length, 24, 'hourly should have 24 buckets');
+      assert.ok(Array.isArray(trendsPayload.trends.daily_7));
+      assert.equal(trendsPayload.trends.daily_7.length, 7, 'daily_7 should have 7 buckets');
+      assert.ok(Array.isArray(trendsPayload.trends.daily_30));
+      assert.equal(trendsPayload.trends.daily_30.length, 30, 'daily_30 should have 30 buckets');
+      assert.ok(Array.isArray(trendsPayload.trends.top_types_24h));
+      assert.ok(Array.isArray(trendsPayload.trends.top_types_7d));
+      assert.ok(Array.isArray(trendsPayload.trends.top_types_30d));
+      assert.ok(typeof trendsPayload.trends.event_count_24h === 'number');
+      assert.ok(typeof trendsPayload.trends.event_count_7d === 'number');
+      assert.ok(typeof trendsPayload.trends.event_count_30d === 'number');
+      // events seeded during this test should appear in 24h and 30d windows
+      assert.ok(trendsPayload.trends.event_count_24h >= 1);
+      assert.ok(trendsPayload.trends.top_types_24h.some((item) => item.event_type === 'session.retention_run_executed'));
     });
   } finally {
     if (previousEnv.INTELLEDGER_MAX_TEXT_INGEST_CHARS === undefined) delete process.env.INTELLEDGER_MAX_TEXT_INGEST_CHARS;

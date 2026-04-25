@@ -1345,6 +1345,98 @@ export function createIntelLedgerStorage(filePath) {
         .slice(0, limit);
     },
 
+    async getAuditTrends(options = {}) {
+      const store = await get();
+      const actorUserId = options.actorUserId ? String(options.actorUserId) : null;
+      const actorTenantId = options.actorTenantId ? String(options.actorTenantId) : null;
+      const sessionId = options.sessionId ? String(options.sessionId) : null;
+
+      const now = Date.now();
+      const msPerHour = 60 * 60 * 1000;
+      const since30d = now - 30 * 24 * msPerHour;
+
+      const filtered = store.audit_events.filter((item) => {
+        const ts = new Date(item.created_at || 0).getTime();
+        if (!Number.isFinite(ts) || ts < since30d) return false;
+        if (actorUserId && item.actor_user_id !== actorUserId) return false;
+        if (actorTenantId && item.actor_tenant_id !== actorTenantId) return false;
+        if (sessionId && item.session_id !== sessionId) return false;
+        return true;
+      });
+
+      // 24 hourly buckets (last 24 h)
+      const hourlyMap = new Map();
+      for (let i = 0; i < 24; i++) {
+        const bucketStart = new Date(now - (i + 1) * msPerHour);
+        const label = `${String(bucketStart.getUTCHours()).padStart(2, '0')}:00`;
+        const key = `${bucketStart.toISOString().slice(0, 10)}T${label}`;
+        hourlyMap.set(key, { bucket: key, count: 0 });
+      }
+      const since24h = now - 24 * msPerHour;
+
+      // daily map for 30 days
+      const daily30Map = new Map();
+      for (let i = 0; i < 30; i++) {
+        const d = new Date(now - i * 24 * msPerHour);
+        const key = d.toISOString().slice(0, 10);
+        daily30Map.set(key, { date: key, count: 0 });
+      }
+
+      const byType24h = new Map();
+      const byType7d = new Map();
+      const byType30d = new Map();
+      const since7d = now - 7 * 24 * msPerHour;
+
+      for (const event of filtered) {
+        const ts = new Date(event.created_at || 0).getTime();
+        const typeKey = String(event.event_type || 'unknown');
+
+        // hourly bucket
+        if (ts >= since24h) {
+          const bucketHour = Math.floor((now - ts) / msPerHour);
+          const bucketStart = new Date(now - (bucketHour + 1) * msPerHour);
+          const label = `${String(bucketStart.getUTCHours()).padStart(2, '0')}:00`;
+          const key = `${bucketStart.toISOString().slice(0, 10)}T${label}`;
+          if (hourlyMap.has(key)) hourlyMap.get(key).count += 1;
+          byType24h.set(typeKey, (byType24h.get(typeKey) || 0) + 1);
+        }
+
+        // daily 7d
+        if (ts >= since7d) {
+          byType7d.set(typeKey, (byType7d.get(typeKey) || 0) + 1);
+        }
+
+        // daily 30d and daily bucket
+        const dayKey = new Date(ts).toISOString().slice(0, 10);
+        if (daily30Map.has(dayKey)) daily30Map.get(dayKey).count += 1;
+        byType30d.set(typeKey, (byType30d.get(typeKey) || 0) + 1);
+      }
+
+      const topN = (map, n = 10) =>
+        Array.from(map.entries())
+          .map(([event_type, count]) => ({ event_type, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, n);
+
+      const hourly = Array.from(hourlyMap.values()).sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
+      const daily_7 = Array.from(daily30Map.values())
+        .filter((item) => new Date(item.date).getTime() >= since7d)
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+      const daily_30 = Array.from(daily30Map.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+      return {
+        hourly,
+        daily_7,
+        daily_30,
+        top_types_24h: topN(byType24h),
+        top_types_7d: topN(byType7d),
+        top_types_30d: topN(byType30d),
+        event_count_24h: hourly.reduce((s, b) => s + b.count, 0),
+        event_count_7d: daily_7.reduce((s, b) => s + b.count, 0),
+        event_count_30d: daily_30.reduce((s, b) => s + b.count, 0)
+      };
+    },
+
     async runBatchEvaluation(sessionIds = [], options = {}) {
       const uniqueIds = [...new Set((Array.isArray(sessionIds) ? sessionIds : []).map((item) => String(item || '').trim()).filter(Boolean))];
       const runs = [];

@@ -1000,6 +1000,48 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     }
   });
 
+  router.get('/audit/trends', async (req, res) => {
+    try {
+      if (typeof storage.getAuditTrends !== 'function') {
+        return res.status(501).json({ error: 'Audit trends are not supported by this storage backend.' });
+      }
+
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+      if (!identity.userId && !identity.trustedUserId && !identity.tenantId) {
+        return res.status(400).json({ error: 'userId or tenant context is required.' });
+      }
+
+      const sessionId = req.query?.session_id || req.query?.sessionId;
+
+      let actorUserId = req.query?.actor_user_id || req.query?.actorUserId || null;
+      let actorTenantId = req.query?.actor_tenant_id || req.query?.actorTenantId || null;
+
+      if (identity.trustedUserId) {
+        if (actorUserId && String(actorUserId) !== identity.trustedUserId) {
+          return res.status(403).json({ error: 'actor_user_id does not match authenticated context.' });
+        }
+        actorUserId = identity.trustedUserId;
+      } else if (!actorUserId && identity.userId) {
+        actorUserId = identity.userId;
+      }
+
+      if (identity.trustedTenantId) {
+        if (actorTenantId && String(actorTenantId) !== identity.trustedTenantId) {
+          return res.status(403).json({ error: 'actor_tenant_id does not match authenticated context.' });
+        }
+        actorTenantId = identity.trustedTenantId;
+      } else if (!actorTenantId && identity.tenantId) {
+        actorTenantId = identity.tenantId;
+      }
+
+      const trends = await storage.getAuditTrends({ actorUserId, actorTenantId, sessionId });
+      return res.json({ trends });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   router.use('/sessions/:sessionId', async (req, res, next) => {
     try {
       const identity = resolveIdentity(req);
