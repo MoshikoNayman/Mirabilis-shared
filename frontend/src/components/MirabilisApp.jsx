@@ -292,7 +292,14 @@ function IntelLedgerApp({ userId }) {
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.error || 'Cross-synthesis failed');
-      setCrossSynthesis({ loading: false, result: payload.synthesis, error: null, sessionCount: ids.length });
+      setCrossSynthesis({
+        loading: false,
+        result: payload.synthesis,
+        error: null,
+        sessionCount: ids.length,
+        promptProfile: payload.prompt_profile || null,
+        promptVersion: payload.prompt_version || null
+      });
     } catch (err) {
       setCrossSynthesis({ loading: false, result: null, error: err.message, sessionCount: ids.length });
     }
@@ -864,7 +871,14 @@ function IntelLedgerApp({ userId }) {
                         });
                         const payload = await res.json();
                         if (!res.ok) throw new Error(payload?.error || 'Cross-synthesis failed');
-                        setCrossSynthesis({ loading: false, result: payload.synthesis, error: null, sessionCount: ids.length });
+                        setCrossSynthesis({
+                          loading: false,
+                          result: payload.synthesis,
+                          error: null,
+                          sessionCount: ids.length,
+                          promptProfile: payload.prompt_profile || null,
+                          promptVersion: payload.prompt_version || null
+                        });
                       } catch (err) {
                         setCrossSynthesis({ loading: false, result: null, error: err.message, sessionCount: ids.length });
                       }
@@ -1335,6 +1349,16 @@ function IntelLedgerApp({ userId }) {
               <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
                 Analyzing {crossSynthesis.sessionCount} sessions...
+              </div>
+            )}
+            {(crossSynthesis.promptProfile || crossSynthesis.promptVersion) && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                {crossSynthesis.promptProfile && (
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Prompt {crossSynthesis.promptProfile}</span>
+                )}
+                {crossSynthesis.promptVersion && (
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Version {crossSynthesis.promptVersion}</span>
+                )}
               </div>
             )}
             {crossSynthesis.error && (

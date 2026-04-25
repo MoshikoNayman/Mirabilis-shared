@@ -863,6 +863,16 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                           {sig.due_date && (
                             <span className="text-[11px] text-slate-500 dark:text-slate-400">Due: {sig.due_date}</span>
                           )}
+                          {sig.prompt_profile && (
+                            <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                              Prompt {sig.prompt_profile}
+                            </span>
+                          )}
+                          {sig.prompt_version && (
+                            <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                              Version {sig.prompt_version}
+                            </span>
+                          )}
                         </div>
                         <div className="mt-2 font-semibold text-slate-900 dark:text-white text-sm">{sig.value}</div>
                         {Number.isFinite(Number(sig.start_ms)) && (
@@ -1196,6 +1206,23 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   ) : null;
                 return (
                   <div className="space-y-5">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                      {synthesis.prompt_profile && (
+                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                          Prompt {synthesis.prompt_profile}
+                        </span>
+                      )}
+                      {synthesis.prompt_version && (
+                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                          Version {synthesis.prompt_version}
+                        </span>
+                      )}
+                      {synthesis.generated_at && (
+                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                          Generated {new Date(synthesis.generated_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                        </span>
+                      )}
+                    </div>
                     {r.summary && (
                       <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
                         {r.summary}
