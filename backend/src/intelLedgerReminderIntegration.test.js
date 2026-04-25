@@ -150,6 +150,24 @@ test('integration: reminders status exposes worker hardening fields', async (t) 
   assert.ok(typeof payload?.worker?.last_cycle_suppressed_count === 'number');
   assert.ok(typeof payload?.worker?.last_cycle_processed_count === 'number');
   assert.ok(typeof payload?.due_preview_count === 'number');
+
+  const opsRes = await fetch(`${baseUrl}/api/intelledger/ops/status`);
+  if (!opsRes.ok) {
+    throw new Error(`Ops status endpoint failed (${opsRes.status})\n${stderr}`);
+  }
+
+  const opsPayload = await opsRes.json();
+  assert.equal(opsPayload?.status, 'ok');
+  assert.ok(typeof opsPayload?.service?.started_at === 'string');
+  assert.ok(typeof opsPayload?.service?.uptime_ms === 'number');
+  assert.ok(opsPayload.service.uptime_ms >= 0);
+  assert.equal(typeof opsPayload?.service?.pid, 'number');
+  assert.equal(typeof opsPayload?.service?.node_version, 'string');
+  assert.ok(typeof opsPayload?.service?.memory?.rss === 'number');
+  assert.ok(typeof opsPayload?.worker?.total_cycles === 'number');
+  assert.ok(typeof opsPayload?.worker?.total_processed_count === 'number');
+  assert.ok(typeof opsPayload?.worker?.total_suppressed_count === 'number');
+  assert.ok(typeof opsPayload?.worker?.total_error_count === 'number');
 });
 
 test('integration: manual reminder run endpoint executes one cycle deterministically', async (t) => {

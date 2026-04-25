@@ -2589,6 +2589,8 @@ const INTELLEDGER_REMINDER_WORKER_BATCH_SIZE = Math.max(1, Math.min(Number(proce
 const INTELLEDGER_REMINDER_MIN_INTERVAL_MS = Math.max(60000, Number(process.env.INTELLEDGER_REMINDER_MIN_INTERVAL_MS || 15 * 60 * 1000));
 const INTELLEDGER_REMINDER_WEBHOOK_URL = String(process.env.INTELLEDGER_REMINDER_WEBHOOK_URL || '').trim();
 const INTELLEDGER_REMINDER_WEBHOOK_SECRET = String(process.env.INTELLEDGER_REMINDER_WEBHOOK_SECRET || '');
+const intelLedgerServiceStartedAtMs = Date.now();
+const intelLedgerServiceStartedAt = new Date(intelLedgerServiceStartedAtMs).toISOString();
 
 let intelLedgerReminderWorkerTimer = null;
 const intelLedgerReminderWorkerState = {
@@ -2606,6 +2608,10 @@ const intelLedgerReminderWorkerState = {
   last_trigger: null,
   last_success_at: null,
   last_error: null,
+  total_cycles: 0,
+  total_processed_count: 0,
+  total_suppressed_count: 0,
+  total_error_count: 0,
   dispatches: []
 };
 
@@ -2626,6 +2632,28 @@ function buildReminderStatusPayload(previewDue) {
       next_reminder_at: item.next_reminder_at,
       is_overdue: Boolean(item.is_overdue)
     }))
+  };
+}
+
+function buildIntelLedgerOpsStatusPayload(previewDue) {
+  const safePreview = Array.isArray(previewDue) ? previewDue : [];
+  const memory = process.memoryUsage();
+  return {
+    status: 'ok',
+    service: {
+      started_at: intelLedgerServiceStartedAt,
+      uptime_ms: Math.max(0, Date.now() - intelLedgerServiceStartedAtMs),
+      pid: process.pid,
+      node_version: process.version,
+      memory: {
+        rss: memory.rss,
+        heap_total: memory.heapTotal,
+        heap_used: memory.heapUsed,
+        external: memory.external,
+        array_buffers: memory.arrayBuffers
+      }
+    },
+    ...buildReminderStatusPayload(safePreview)
   };
 }
 
@@ -2721,6 +2749,7 @@ async function dispatchIntelLedgerReminder(action) {
 
 async function runIntelLedgerReminderCycle(trigger = 'timer') {
   intelLedgerReminderWorkerState.last_trigger = trigger;
+  intelLedgerReminderWorkerState.total_cycles += 1;
   try {
     intelLedgerReminderWorkerState.last_cycle_started_at = new Date().toISOString();
     const due = await intelLedgerStorage.getDueReminderActions({
@@ -2748,6 +2777,7 @@ async function runIntelLedgerReminderCycle(trigger = 'timer') {
 
       if (shouldSuppressReminder(action, INTELLEDGER_REMINDER_MIN_INTERVAL_MS)) {
         intelLedgerReminderWorkerState.last_cycle_suppressed_count += 1;
+        intelLedgerReminderWorkerState.total_suppressed_count += 1;
         rememberReminderDispatch({
           at: new Date().toISOString(),
           session_id: sessionId,
@@ -2763,6 +2793,7 @@ async function runIntelLedgerReminderCycle(trigger = 'timer') {
 
       const delivery = await dispatchIntelLedgerReminder(action);
       intelLedgerReminderWorkerState.last_cycle_processed_count += 1;
+      intelLedgerReminderWorkerState.total_processed_count += 1;
 
       // Placeholder dispatch channel for V2.3; real delivery hooks can replace this log.
       console.log('[InteLedger reminder]', {
@@ -2806,6 +2837,7 @@ async function runIntelLedgerReminderCycle(trigger = 'timer') {
       trigger
     };
   } catch (error) {
+    intelLedgerReminderWorkerState.total_error_count += 1;
     intelLedgerReminderWorkerState.last_error = error?.message || String(error);
     intelLedgerReminderWorkerState.last_cycle_completed_at = new Date().toISOString();
     console.error('[InteLedger reminder worker] cycle error:', error?.message || error);
@@ -2826,6 +2858,15 @@ app.get('/api/intelledger/reminders/status', async (_req, res) => {
     res.json(buildReminderStatusPayload(previewDue));
   } catch (error) {
     res.status(500).json({ error: error?.message || 'Failed to read reminder status' });
+  }
+});
+
+app.get('/api/intelledger/ops/status', async (_req, res) => {
+  try {
+    const previewDue = await intelLedgerStorage.getDueReminderActions({ limit: 10 });
+    res.json(buildIntelLedgerOpsStatusPayload(previewDue));
+  } catch (error) {
+    res.status(500).json({ error: error?.message || 'Failed to read IntelLedger ops status' });
   }
 });
 
