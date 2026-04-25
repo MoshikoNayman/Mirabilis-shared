@@ -552,7 +552,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
   });
 
   return (
-    <main className="relative h-screen w-screen p-3 sm:p-6">
+    <main className="relative h-full w-full p-3 sm:p-6">
       <div className="mx-auto flex h-full max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
           <div className="space-y-1">

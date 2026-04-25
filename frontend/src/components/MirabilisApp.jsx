@@ -726,8 +726,8 @@ function IntelLedgerApp({ userId }) {
 
   return (
     <>
-    <main className="relative h-screen w-screen p-3 sm:p-6">
-      <div className="mx-auto flex h-full max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
+    <main className="relative h-full w-full p-3 sm:p-6">
+      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
         <div className="grid gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-4 dark:border-white/10 dark:bg-slate-900/45 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
           <div className="space-y-3">
             <div className="space-y-1">
@@ -833,6 +833,9 @@ function IntelLedgerApp({ userId }) {
             </div>
           </div>
         </div>
+
+        <div className="flex-1 min-h-0 grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
+        <div className="min-h-0 overflow-auto space-y-3 lg:col-start-2">
 
         {!localMode && (digestLoading || todayDigest) && (
           <div className="rounded-2xl border border-black/10 bg-white/75 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
@@ -1183,6 +1186,10 @@ function IntelLedgerApp({ userId }) {
           </div>
         )}
 
+        </div>
+
+        <div className="min-h-0 flex flex-col gap-3 lg:col-start-1 lg:row-start-1">
+
         {error && (
           <div className="rounded-2xl border border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300">
             {error}
@@ -1338,6 +1345,8 @@ function IntelLedgerApp({ userId }) {
               </button>
             </div>
           )}
+        </div>
+        </div>
         </div>
       </div>
     </main>
