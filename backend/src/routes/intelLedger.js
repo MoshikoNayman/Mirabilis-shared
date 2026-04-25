@@ -7,6 +7,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { resolveIntelLedgerIdentity } from '../intelLedgerIdentity.js';
 
 const INTELLEDGER_SIGNAL_EXTRACTOR_VERSION = 'intelledger-signals-v2.4';
 
@@ -597,29 +598,39 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   const mediaRootDir = path.join(path.dirname(config.intelLedgerStorePath), 'intelledger-media');
   const queuedMediaJobs = [];
   const runningMediaJobs = new Set();
+  const requireAuthContext = String(process.env.INTELLEDGER_REQUIRE_AUTH_CONTEXT || '0') === '1';
 
-  const resolveTenantId = (req) => {
-    const headerTenant = req.headers['x-intelledger-tenant-id'];
-    const queryTenant = req.query?.tenantId || req.query?.tenant_id;
-    const bodyTenant = req.body?.tenantId || req.body?.tenant_id;
-    const value = headerTenant || queryTenant || bodyTenant;
-    const normalized = String(value || '').trim();
-    return normalized ? normalized.slice(0, 120) : null;
+  const resolveIdentity = (req) => resolveIntelLedgerIdentity(req, { requireAuthContext });
+
+  const rejectInvalidIdentity = (res, identity) => {
+    if (identity.authRequiredButMissing) {
+      res.status(401).json({ error: 'Authenticated identity required.' });
+      return true;
+    }
+    if (identity.mismatch.user || identity.mismatch.tenant) {
+      res.status(403).json({ error: 'Request identity does not match authenticated context.' });
+      return true;
+    }
+    return false;
   };
 
   const getSessionTenantId = (session) => String(session?.tenant_id || session?.user_id || 'default').trim();
 
   router.use('/sessions/:sessionId', async (req, res, next) => {
     try {
-      const tenantId = resolveTenantId(req);
-      if (!tenantId) return next();
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+      if (!identity.tenantId && !identity.trustedUserId) return next();
 
       const session = await storage.getSession(req.params.sessionId);
       if (!session) {
         return res.status(404).json({ error: 'Not found' });
       }
 
-      if (getSessionTenantId(session) !== tenantId) {
+      if (identity.tenantId && getSessionTenantId(session) !== identity.tenantId) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+      if (identity.trustedUserId && String(session.user_id || '').trim() !== identity.trustedUserId) {
         return res.status(404).json({ error: 'Not found' });
       }
 
@@ -854,27 +865,31 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   // Sessions
   router.post('/sessions', async (req, res) => {
     try {
-      const { userId, title, description } = req.body;
-      const tenantId = resolveTenantId(req);
-      const session = await storage.createSession(userId, title, description, { tenantId });
+      const { title, description } = req.body;
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+
+      const session = await storage.createSession(identity.userId, title, description, { tenantId: identity.tenantId });
       res.json({ session });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   router.get('/sessions', async (req, res) => {
     try {
-      const { userId } = req.query;
-      const tenantId = resolveTenantId(req);
-      const sessions = await storage.listSessions(userId, { tenantId });
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+      const sessions = await storage.listSessions(identity.userId, { tenantId: identity.tenantId });
       res.json({ sessions });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   router.get('/sessions/brief', async (req, res) => {
     try {
-      const { userId, sessionIds } = req.query;
-      const tenantId = resolveTenantId(req);
-      const allSessions = await storage.listSessions(userId, { tenantId });
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+
+      const { sessionIds } = req.query;
+      const allSessions = await storage.listSessions(identity.userId, { tenantId: identity.tenantId });
       const requestedIds = String(sessionIds || '').split(',').map((v) => v.trim()).filter(Boolean);
       const targetSessions = requestedIds.length > 0
         ? allSessions.filter((item) => requestedIds.includes(item.id))
@@ -958,17 +973,19 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.get('/sessions/search', async (req, res) => {
     try {
-      const { userId, query, limit } = req.query;
-      const tenantId = resolveTenantId(req);
+      const { query, limit } = req.query;
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+
       const cleanedQuery = String(query || '').trim();
       if (!cleanedQuery) {
-        const sessions = await storage.listSessions(userId, { tenantId });
+        const sessions = await storage.listSessions(identity.userId, { tenantId: identity.tenantId });
         return res.json({ sessions, query: '', mode: 'default' });
       }
 
       const sessions = typeof storage.searchSessions === 'function'
-        ? await storage.searchSessions(userId, cleanedQuery, limit, { tenantId })
-        : (await storage.listSessions(userId, { tenantId })).filter((session) => {
+        ? await storage.searchSessions(identity.userId, cleanedQuery, limit, { tenantId: identity.tenantId })
+        : (await storage.listSessions(identity.userId, { tenantId: identity.tenantId })).filter((session) => {
             const haystack = [session.title, session.description, session.topic_preview].join(' ').toLowerCase();
             return haystack.includes(cleanedQuery.toLowerCase());
           });
@@ -983,7 +1000,9 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   router.post('/sessions/cross-synthesize', async (req, res) => {
     try {
       const { sessionIds, query, provider: requestedProvider, model: requestedModel } = req.body;
-      const tenantId = resolveTenantId(req);
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+
       if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
         return res.status(400).json({ error: 'sessionIds array required' });
       }
@@ -997,7 +1016,10 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
             storage.getSignalsBySession(id),
             typeof storage.getActionsBySession === 'function' ? storage.getActionsBySession(id) : []
           ]);
-          if (tenantId && session && getSessionTenantId(session) !== tenantId) {
+          if (identity.tenantId && session && getSessionTenantId(session) !== identity.tenantId) {
+            throw new Error('One or more sessions are not accessible for this tenant.');
+          }
+          if (identity.trustedUserId && session && String(session.user_id || '').trim() !== identity.trustedUserId) {
             throw new Error('One or more sessions are not accessible for this tenant.');
           }
           return { session, interactions: interactions || [], signals: signals || [], actions: actions || [] };
