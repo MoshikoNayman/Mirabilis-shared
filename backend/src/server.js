@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import { mkdir, writeFile, readFile, appendFile, unlink, readdir, rename, chmod } from 'node:fs/promises';
@@ -34,16 +37,64 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024, files: 10 }
 });
 
-app.use(cors({
-  origin: (origin, cb) => {
-    // Allow same-origin requests (no Origin header) and any localhost/loopback origin.
-    // This handles localhost vs 127.0.0.1 discrepancies and any port Next.js picks.
-    if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-      return cb(null, true);
-    }
-    cb(null, false);
+const isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+const configuredOrigins = String(config.frontendOrigin || '')
+  .split(',')
+  .map((item) => item.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+function isLoopbackOrigin(origin) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || '').trim());
+}
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  const normalized = String(origin).trim().replace(/\/$/, '');
+  if (configuredOrigins.includes(normalized)) return true;
+  return config.corsAllowLocalhost && isLoopbackOrigin(normalized);
+}
+
+app.disable('x-powered-by');
+app.set('trust proxy', config.trustProxy);
+
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  strictTransportSecurity: isProduction ? undefined : false
+}));
+
+app.use(compression({
+  filter: (req, res) => {
+    if (String(req.headers.accept || '').includes('text/event-stream')) return false;
+    return compression.filter(req, res);
   }
 }));
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (isAllowedOrigin(origin)) {
+      return cb(null, true);
+    }
+    return cb(new Error('CORS origin denied'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-mirabilis-reminder-timestamp', 'x-mirabilis-reminder-signature'],
+  maxAge: 600
+}));
+
+if (isProduction) {
+  const apiLimiter = rateLimit({
+    windowMs: config.apiRateLimitWindowMs,
+    max: config.apiRateLimitMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please retry shortly.' },
+    skip: (req) => req.path === '/health'
+  });
+  app.use('/api', apiLimiter);
+}
+
 app.use(express.json({ limit: '1mb' }));
 
 function nowIso() {
@@ -2893,6 +2944,19 @@ app.post('/api/intelledger/reminders/run', async (_req, res) => {
   }
 });
 
+app.use((error, _req, res, _next) => {
+  if (error?.message === 'CORS origin denied') {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+
+  const message = isProduction
+    ? 'Internal server error'
+    : (error?.message || 'Internal server error');
+
+  console.error('[backend error]', error?.stack || error?.message || error);
+  return res.status(500).json({ error: message });
+});
+
 if (INTELLEDGER_REMINDER_WORKER_ENABLED) {
   intelLedgerReminderWorkerTimer = setInterval(() => {
     runIntelLedgerReminderCycle();
@@ -2922,4 +2986,37 @@ server.on('error', (error) => {
   }
   console.error('Failed to start backend server:', error?.message || error);
   process.exit(1);
+});
+
+let isShuttingDown = false;
+
+function clearReminderWorkerTimer() {
+  if (!intelLedgerReminderWorkerTimer) return;
+  clearInterval(intelLedgerReminderWorkerTimer);
+  intelLedgerReminderWorkerTimer = null;
+}
+
+function shutdown(reason = 'signal') {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[backend] shutdown requested (${reason})`);
+  clearReminderWorkerTimer();
+  server.close(() => {
+    console.log('[backend] shutdown complete');
+    process.exit(0);
+  });
+  setTimeout(() => {
+    console.error('[backend] forced shutdown timeout reached');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('unhandledRejection', (error) => {
+  console.error('[backend] unhandledRejection:', error);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[backend] uncaughtException:', error);
+  shutdown('uncaughtException');
 });

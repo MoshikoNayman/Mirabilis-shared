@@ -3,7 +3,7 @@
 # Run from:  Mirabilis/desktop/
 # Output:    Mirabilis/desktop/dist/
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIRABILIS="$SCRIPT_DIR/.."
@@ -21,10 +21,20 @@ cp -r "$SCRIPT_DIR/icons"   "$BUILD_DIR/icons"
 cp "$SCRIPT_DIR/package.json" "$BUILD_DIR/package.json"
 
 echo "==> Installing backend dependencies..."
-cd "$MIRABILIS/backend" && npm install --silent
+cd "$MIRABILIS/backend"
+if [ -f package-lock.json ]; then
+  npm ci --silent || npm install --silent
+else
+  npm install --silent
+fi
 
 echo "==> Installing frontend dependencies..."
-cd "$MIRABILIS/frontend" && npm install --silent
+cd "$MIRABILIS/frontend"
+if [ -f package-lock.json ]; then
+  npm ci --silent || npm install --silent
+else
+  npm install --silent
+fi
 
 echo "==> Building Next.js frontend (standalone)..."
 npm run build
@@ -50,7 +60,12 @@ if [ -d "$MIRABILIS/frontend/public" ]; then
 fi
 
 echo "==> Installing Electron build tools..."
-cd "$BUILD_DIR" && npm install --silent
+cd "$BUILD_DIR"
+if [ -f package-lock.json ]; then
+  npm ci --silent || npm install --silent
+else
+  npm install --silent
+fi
 
 echo "==> Running electron-builder..."
 npx electron-builder --dir --projectDir "$BUILD_DIR"

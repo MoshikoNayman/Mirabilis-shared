@@ -10,6 +10,10 @@ const __dirname = path.dirname(__filename);
 export const config = {
   port: Number(process.env.PORT || 4000),
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
+  corsAllowLocalhost: String(process.env.CORS_ALLOW_LOCALHOST ?? '1') !== '0',
+  trustProxy: process.env.TRUST_PROXY || 'loopback',
+  apiRateLimitWindowMs: Math.max(10_000, Number(process.env.API_RATE_LIMIT_WINDOW_MS || 60_000)),
+  apiRateLimitMax: Math.max(50, Number(process.env.API_RATE_LIMIT_MAX || 300)),
   aiProvider: process.env.AI_PROVIDER || 'ollama',
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
   ollamaModel: process.env.OLLAMA_MODEL || 'llama3',
