@@ -156,7 +156,14 @@ function extractOwner(sentence) {
 
 function extractDueDate(sentence) {
   const dueMatch = sentence.match(/\b(?:by|before|due|on)?\s*(today|tomorrow|next\s+week|next\s+month|eod|\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?)\b/i);
-  return dueMatch ? dueMatch[1].trim() : null;
+  if (!dueMatch) return null;
+  const candidate = dueMatch[1].trim();
+  // Validate ISO date format (YYYY-MM-DD) to reject invalid dates like 2026-13-45
+  if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
+    const d = new Date(candidate + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return null; // Invalid date
+  }
+  return candidate;
 }
 
 function extractSignalsWithFallback(rawText, aiSignals) {
@@ -2305,9 +2312,121 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   router.patch('/sessions/:sessionId/actions/:actionId', async (req, res) => {
     try {
       const { sessionId, actionId } = req.params;
-      const updated = await storage.updateAction(sessionId, actionId, req.body || {});
+      const patch = req.body || {};
+      // Validate enum fields
+      const validPriorities = new Set(['low', 'medium', 'high']);
+      const validStatuses = new Set(['open', 'in_progress', 'done', 'blocked']);
+      if (patch.priority && !validPriorities.has(patch.priority)) {
+        return res.status(400).json({ error: `priority must be one of: ${Array.from(validPriorities).join(', ')}` });
+      }
+      if (patch.status && !validStatuses.has(patch.status)) {
+        return res.status(400).json({ error: `status must be one of: ${Array.from(validStatuses).join(', ')}` });
+      }
+      const updated = await storage.updateAction(sessionId, actionId, patch);
       if (!updated) return res.status(404).json({ error: 'Action not found' });
       res.json({ action: updated });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Action Tags Management
+  router.post('/sessions/:sessionId/actions/:actionId/tags', async (req, res) => {
+    try {
+      const { sessionId, actionId } = req.params;
+      const { tags } = req.body || {};
+      if (!Array.isArray(tags)) {
+        return res.status(400).json({ error: 'tags must be an array' });
+      }
+      const action = await storage.getAction(sessionId, actionId);
+      if (!action) return res.status(404).json({ error: 'Action not found' });
+      const newTags = new Set([...(action.tags || []), ...tags.map(t => String(t).trim().toLowerCase()).filter(Boolean)]);
+      const updated = await storage.updateAction(sessionId, actionId, { tags: Array.from(newTags) });
+      res.json({ action: updated });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.delete('/sessions/:sessionId/actions/:actionId/tags/:tag', async (req, res) => {
+    try {
+      const { sessionId, actionId, tag } = req.params;
+      const action = await storage.getAction(sessionId, actionId);
+      if (!action) return res.status(404).json({ error: 'Action not found' });
+      const newTags = (action.tags || []).filter(t => t !== tag.toLowerCase());
+      const updated = await storage.updateAction(sessionId, actionId, { tags: newTags });
+      res.json({ action: updated });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get('/sessions/:sessionId/actions/by-tag/:tag', async (req, res) => {
+    try {
+      const { sessionId, tag } = req.params;
+      const actions = await storage.getActionsBySession(sessionId);
+      const filtered = actions.filter(a => (a.tags || []).includes(tag.toLowerCase()));
+      res.json({ actions: filtered, count: filtered.length });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Action Dependencies Management
+  router.post('/sessions/:sessionId/actions/:actionId/dependencies', async (req, res) => {
+    try {
+      const { sessionId, actionId } = req.params;
+      const { depends_on } = req.body || {};
+      if (!Array.isArray(depends_on)) {
+        return res.status(400).json({ error: 'depends_on must be an array of action IDs' });
+      }
+      const action = await storage.getAction(sessionId, actionId);
+      if (!action) return res.status(404).json({ error: 'Action not found' });
+      
+      // Check for self-reference
+      if (depends_on.includes(actionId)) {
+        return res.status(400).json({ error: 'Action cannot depend on itself' });
+      }
+      
+      // Merge new dependencies - verify all exist
+      const currentDeps = new Set(action.depends_on || []);
+      const allActions = await storage.getActionsBySession(sessionId);
+      const validDepIds = new Set(allActions.map(a => a.id));
+      
+      for (const depId of depends_on) {
+        if (validDepIds.has(depId)) {
+          currentDeps.add(depId);
+        }
+      }
+      
+      const updated = await storage.updateAction(sessionId, actionId, { depends_on: Array.from(currentDeps) });
+      res.json({ action: updated });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.delete('/sessions/:sessionId/actions/:actionId/dependencies/:depId', async (req, res) => {
+    try {
+      const { sessionId, actionId, depId } = req.params;
+      const action = await storage.getAction(sessionId, actionId);
+      if (!action) return res.status(404).json({ error: 'Action not found' });
+      const newDeps = (action.depends_on || []).filter(d => d !== depId);
+      const updated = await storage.updateAction(sessionId, actionId, { depends_on: newDeps });
+      res.json({ action: updated });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get('/sessions/:sessionId/actions/:actionId/dependencies', async (req, res) => {
+    try {
+      const { sessionId, actionId } = req.params;
+      const action = await storage.getAction(sessionId, actionId);
+      if (!action) return res.status(404).json({ error: 'Action not found' });
+      const depIds = action.depends_on || [];
+      const allActions = await storage.getActionsBySession(sessionId);
+      const actionMap = new Map(allActions.map(a => [a.id, a]));
+      const dependencies = depIds
+        .map(id => actionMap.get(id))
+        .filter(Boolean)
+        .map(dep => ({
+          id: dep.id,
+          title: dep.title,
+          status: dep.status,
+          is_complete: dep.status === 'done',
+          priority: dep.priority,
+          due_date: dep.due_date
+        }));
+      res.json({ action_id: actionId, dependencies, blocked: dependencies.some(d => d.status !== 'done') });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

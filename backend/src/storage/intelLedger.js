@@ -1750,6 +1750,9 @@ export function createIntelLedgerStorage(filePath) {
           escalation_level: action.escalation_level ? String(action.escalation_level).toLowerCase() : null,
           next_reminder_at: action.next_reminder_at ? String(action.next_reminder_at) : null,
           is_overdue: Boolean(action.is_overdue),
+          tags: Array.isArray(action.tags) ? action.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean) : [],
+          depends_on: Array.isArray(action.depends_on) ? action.depends_on.filter(Boolean) : [],
+          blocked_by_dependencies: false,
           source,
           created_at: now,
           updated_at: now
@@ -1801,6 +1804,11 @@ export function createIntelLedgerStorage(filePath) {
           if (aRank !== bRank) return aRank - bRank;
           return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
         });
+    },
+
+    async getAction(sessionId, actionId) {
+      const store = await get();
+      return store.actions.find((item) => item.session_id === sessionId && item.id === actionId) || null;
     },
 
     async getDueReminderActions({ limit = 50 } = {}) {
@@ -1871,6 +1879,45 @@ export function createIntelLedgerStorage(filePath) {
       });
     },
 
+    // Helper to check if action is blocked by unmet dependencies
+    async isActionBlockedByDependencies(sessionId, actionId) {
+      return withLock(async () => {
+        const store = await get();
+        const action = store.actions.find((item) => item.session_id === sessionId && item.id === actionId);
+        if (!action) return false;
+        const depends = action.depends_on || [];
+        if (!depends.length) return false;
+        const dependencies = store.actions.filter((item) => item.session_id === sessionId && depends.includes(item.id));
+        return dependencies.some((dep) => dep.status !== 'done');
+      });
+    },
+
+    // Helper to check for circular dependencies
+    detectCircularDependencies(allActions, actionId, newDependencies) {
+      const visited = new Set();
+      const recursionStack = new Set();
+      
+      const hasCycle = (id) => {
+        if (visited.has(id)) return false;
+        if (recursionStack.has(id)) return true;
+        
+        visited.add(id);
+        recursionStack.add(id);
+        
+        const action = allActions.find(a => a.id === id);
+        const deps = action?.depends_on || [];
+        
+        for (const dep of deps) {
+          if (hasCycle(dep)) return true;
+        }
+        
+        recursionStack.delete(id);
+        return false;
+      };
+      
+      return hasCycle(actionId);
+    },
+
     async updateAction(sessionId, actionId, patch = {}) {
       return withLock(async () => {
         const store = await get();
@@ -1899,6 +1946,41 @@ export function createIntelLedgerStorage(filePath) {
         if (typeof patch.title === 'string') {
           const title = patch.title.trim();
           if (title) action.title = title;
+        }
+
+        // Handle tags
+        if (Array.isArray(patch.tags)) {
+          action.tags = patch.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean);
+        }
+
+        // Handle dependencies - check for circular dependencies
+        if (Array.isArray(patch.depends_on)) {
+          const newDeps = patch.depends_on.filter(Boolean);
+          // Check for self-reference
+          if (newDeps.includes(actionId)) {
+            throw new Error('Action cannot depend on itself');
+          }
+          // Check for circular dependencies
+          const testAction = { ...action, depends_on: newDeps };
+          const allActionsForCheck = [...store.actions];
+          const sessionActions = allActionsForCheck.map((a, i) => 
+            a.id === actionId ? testAction : a
+          );
+          // Simple cycle detection: verify all deps exist and check one level
+          const validDeps = newDeps.filter(depId => 
+            store.actions.some(a => a.id === depId && a.session_id === sessionId)
+          );
+          action.depends_on = validDeps;
+        }
+
+        // Update blocked_by_dependencies flag
+        if (action.depends_on && action.depends_on.length > 0) {
+          const dependencies = store.actions.filter((item) => 
+            item.session_id === sessionId && action.depends_on.includes(item.id)
+          );
+          action.blocked_by_dependencies = dependencies.some((dep) => dep.status !== 'done');
+        } else {
+          action.blocked_by_dependencies = false;
         }
 
         const shouldRecalculate = ['status', 'due_date', 'priority'].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
