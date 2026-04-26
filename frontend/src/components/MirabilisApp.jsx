@@ -143,6 +143,25 @@ function sessionInsights(session) {
   return '';
 }
 
+function humanizePromptProfile(profileId) {
+  const raw = String(profileId || '').trim();
+  if (!raw) return 'Default';
+  return raw
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function humanizePromptVersion(versionId) {
+  const raw = String(versionId || '').trim();
+  if (!raw) return 'Custom';
+  const revMatch = raw.match(/(?:^|[-_])v(\d+)\b/i);
+  if (revMatch) {
+    return `Revision ${revMatch[1]}`;
+  }
+  return 'Custom';
+}
+
 function textContainsQuery(value, query) {
   const source = String(value || '').toLowerCase();
   return source.includes(query);
@@ -215,7 +234,7 @@ export default function MirabilisApp() {
         <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-slate-700/90 dark:text-slate-300/90">
           {APP_FOOTER_TEXT}
           <span className="mx-1.5 opacity-40">·</span>
-          <span className="opacity-55">v{APP_VERSION}</span>
+          <span className="opacity-55">{APP_VERSION}</span>
         </footer>
       )}
     </div>
@@ -726,8 +745,8 @@ function IntelLedgerApp({ userId }) {
 
   return (
     <>
-    <main className="relative h-full w-full overflow-hidden p-3 pb-8 sm:p-4 sm:pb-10">
-      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-4 sm:p-4">
+    <main className="relative h-screen w-screen overflow-hidden p-3 pb-8 sm:p-6 sm:pb-10">
+      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
         <div className="grid gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
           <div className="space-y-2">
             <div className="space-y-1">
@@ -1054,7 +1073,7 @@ function IntelLedgerApp({ userId }) {
                       >
                         <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">{profile.profile_id}</div>
                         <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                          Active {profile.active_label || profile.active_version_id || 'fallback'}
+                          Active {profile.active_label || 'default'}
                         </div>
                         <div className="mt-0.5 text-[10px] text-slate-400">Versions {profile.version_count || 0}</div>
                       </button>
@@ -1071,7 +1090,7 @@ function IntelLedgerApp({ userId }) {
                     <>
                       <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
                         <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Profile {promptProfileDetail.profile_id}</span>
-                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Active {promptProfileDetail.active_version_id || 'fallback'}</span>
+                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Active {promptProfileDetail.active_label || 'default'}</span>
                       </div>
 
                       <div className="space-y-1.5">
@@ -1082,7 +1101,6 @@ function IntelLedgerApp({ userId }) {
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                   <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-100">{version.label || version.id}</div>
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400">{version.id}</div>
                                 </div>
                                 <button
                                   type="button"
@@ -1305,12 +1323,12 @@ function IntelLedgerApp({ userId }) {
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         {session.latest_synthesis_prompt_version && (
                           <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
-                            Synth {session.latest_synthesis_prompt_profile || 'default'}:{session.latest_synthesis_prompt_version}
+                            Synth {humanizePromptProfile(session.latest_synthesis_prompt_profile)} {humanizePromptVersion(session.latest_synthesis_prompt_version)}
                           </span>
                         )}
                         {session.latest_signal_prompt_version && (
                           <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
-                            Signal {session.latest_signal_prompt_profile || 'default'}:{session.latest_signal_prompt_version}
+                            Signal {humanizePromptProfile(session.latest_signal_prompt_profile)} {humanizePromptVersion(session.latest_signal_prompt_version)}
                           </span>
                         )}
                       </div>
@@ -1393,10 +1411,10 @@ function IntelLedgerApp({ userId }) {
             {(crossSynthesis.promptProfile || crossSynthesis.promptVersion) && (
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
                 {crossSynthesis.promptProfile && (
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Prompt {crossSynthesis.promptProfile}</span>
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Prompt {humanizePromptProfile(crossSynthesis.promptProfile)}</span>
                 )}
                 {crossSynthesis.promptVersion && (
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Version {crossSynthesis.promptVersion}</span>
+                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">{humanizePromptVersion(crossSynthesis.promptVersion)}</span>
                 )}
               </div>
             )}
