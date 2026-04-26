@@ -1606,7 +1606,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         const sLines = signals.slice(0, 30).map((item) => `  - [${item.signal_type}] ${item.value}`).join('\n');
         const aLines = actions.filter((a) => a.status !== 'done').slice(0, 15).map((a) => `  - [${a.priority || 'medium'}] ${a.title}`).join('\n');
         return [
-          `=== Session ${idx + 1}: ${session?.title || id} ===`,
+          `=== Session ${idx + 1}: ${session?.title || session?.id || 'Unknown'} ===`,
           'Interactions:',
           iLines || '  (none)',
           'Signals:',

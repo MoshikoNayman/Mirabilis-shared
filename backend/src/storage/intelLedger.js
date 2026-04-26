@@ -1782,7 +1782,7 @@ export function createIntelLedgerStorage(filePath) {
 
         store.actions = [
           ...store.actions.filter((item) => item.session_id !== sessionId),
-          ...existing,
+          ...existing.filter((item) => matchedExistingIds.has(item.id) || isManualTouched(item)),
           ...toAdd
         ];
 
