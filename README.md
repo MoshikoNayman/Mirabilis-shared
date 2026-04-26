@@ -34,6 +34,18 @@ Open: **http://localhost:3000**
 
 ---
 
+## Public Repo Notes
+
+Mirabilis is built to be local-first.
+
+- Chats, IntelLedger session data, prompt profiles, and local runtime state stay on your machine unless you intentionally connect a remote provider or external service.
+- Cloud providers are optional. If you use one, you bring your own API key and endpoint configuration.
+- Desktop release artifacts may be packaged before Apple signing/notarization is configured for every release cycle. When that happens, the app can still be built and run locally, but macOS may show its normal unsigned-app warning.
+
+If you prefer, you can always build Mirabilis directly from this repository instead of relying on prebuilt desktop artifacts.
+
+---
+
 ## IntelLedger in 60 Seconds
 
 IntelLedger is the built-in memory workspace for turning messy conversations into clear decisions and next steps.
