@@ -290,14 +290,55 @@ function IntelLedgerApp({ userId }) {
   const selectAll = () => setSelectedSessions(new Set(filteredSessions.map((s) => s.id)));
   const deselectAll = () => setSelectedSessions(new Set());
 
-  const bulkDelete = () => {
+  const deleteSessionsByIds = async (ids) => {
+    const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+    if (!uniqueIds.length) return { deletedIds: [], failedIds: [] };
+
+    const deletedIds = [];
+    const failedIds = [];
+
+    for (const id of uniqueIds) {
+      const isLocalSession = String(id).startsWith('local-');
+      if (isLocalSession) {
+        const updatedLocal = readLocalSessions(userId).filter((session) => session.id !== id);
+        writeLocalSessions(userId, updatedLocal);
+        clearLocalSessionState(userId, id);
+        deletedIds.push(id);
+        continue;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/intelledger/sessions/${encodeURIComponent(id)}`, {
+          method: 'DELETE'
+        });
+        await readJsonOrThrow(res, 'Failed to delete InteLedger session.');
+        deletedIds.push(id);
+      } catch {
+        failedIds.push(id);
+      }
+    }
+
+    return { deletedIds, failedIds };
+  };
+
+  const bulkDelete = async () => {
     const ids = [...selectedSessions];
-    const updated = readLocalSessions(userId).filter((s) => !ids.includes(s.id));
-    for (const id of ids) clearLocalSessionState(userId, id);
-    writeLocalSessions(userId, updated);
-    setSessions(updated);
-    if (ids.includes(activeSession)) setActiveSession(null);
-    setSelectedSessions(new Set());
+    if (!ids.length) return;
+
+    setError('');
+    const { deletedIds, failedIds } = await deleteSessionsByIds(ids);
+    const deletedSet = new Set(deletedIds);
+
+    if (deletedSet.size > 0) {
+      setSessions((previous) => previous.filter((session) => !deletedSet.has(session.id)));
+      if (activeSession && deletedSet.has(activeSession)) setActiveSession(null);
+    }
+
+    setSelectedSessions((previous) => new Set([...previous].filter((id) => !deletedSet.has(id))));
+
+    if (failedIds.length > 0) {
+      setError(`Failed to delete ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}. Please refresh and try again.`);
+    }
   };
 
   const bulkSynthesize = async () => {
@@ -699,25 +740,53 @@ function IntelLedgerApp({ userId }) {
     }
   };
 
-  const deleteSession = (sessionId) => {
-    const updated = readLocalSessions(userId).filter((session) => session.id !== sessionId);
-    writeLocalSessions(userId, updated);
-    clearLocalSessionState(userId, sessionId);
-    setSessions(updated);
-    if (activeSession === sessionId) {
-      setActiveSession(null);
+  const deleteSession = async (sessionId) => {
+    if (!sessionId) return;
+    setError('');
+
+    const { deletedIds, failedIds } = await deleteSessionsByIds([sessionId]);
+    if (deletedIds.length > 0) {
+      setSessions((previous) => previous.filter((session) => session.id !== sessionId));
+      if (activeSession === sessionId) {
+        setActiveSession(null);
+      }
+      setSelectedSessions((previous) => {
+        const next = new Set(previous);
+        next.delete(sessionId);
+        return next;
+      });
+      return;
+    }
+
+    if (failedIds.length > 0) {
+      setError('Failed to delete session. Please refresh and try again.');
     }
   };
 
-  const clearAllSessions = () => {
-    const currentSessions = readLocalSessions(userId);
-    for (const session of currentSessions) {
-      clearLocalSessionState(userId, session.id);
+  const clearAllSessions = async () => {
+    const ids = sessions.map((session) => session.id).filter(Boolean);
+    if (!ids.length) {
+      setAllowClearAll(false);
+      return;
     }
-    writeLocalSessions(userId, []);
-    setSessions([]);
-    setAllowClearAll(false);
-    setActiveSession(null);
+
+    setError('');
+    const { deletedIds, failedIds } = await deleteSessionsByIds(ids);
+    const deletedSet = new Set(deletedIds);
+
+    if (deletedSet.size > 0) {
+      setSessions((previous) => previous.filter((session) => !deletedSet.has(session.id)));
+      if (activeSession && deletedSet.has(activeSession)) setActiveSession(null);
+    }
+
+    if (failedIds.length === 0) {
+      setAllowClearAll(false);
+      setSelectedSessions(new Set());
+      return;
+    }
+
+    setSelectedSessions((previous) => new Set([...previous].filter((id) => !deletedSet.has(id))));
+    setError(`Failed to clear ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}. Refresh and retry.`);
   };
 
   const handleSessionUpdate = (updatedSession) => {
