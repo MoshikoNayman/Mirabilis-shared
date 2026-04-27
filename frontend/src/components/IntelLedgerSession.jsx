@@ -531,9 +531,6 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
     }
   };
 
-  if (!session && loadingSession) return <div className="p-6 text-center text-slate-500">Loading...</div>;
-  if (!session) return <div className="p-6 text-center text-slate-500">Loading...</div>;
-
   const ownerOptions = useMemo(
     () => [...new Set(signals.map((sig) => String(sig.owner || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [signals]
@@ -566,6 +563,9 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
     const bIdx = SIGNAL_TYPE_ORDER.indexOf(b);
     return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
   }), [signalsByTypeRaw]);
+
+  if (!session && loadingSession) return <div className="p-6 text-center text-slate-500">Loading...</div>;
+  if (!session) return <div className="p-6 text-center text-slate-500">Loading...</div>;
 
   return (
     <main className="relative h-screen w-screen overflow-hidden p-3 pb-8 sm:p-6 sm:pb-10">
