@@ -34,6 +34,20 @@ Open: **http://localhost:3000**
 
 ---
 
+## Desktop Downloads (Recommended)
+
+Mirabilis supports both:
+
+- **Web mode** (run from source with `node run.js`)
+- **Desktop app** (prebuilt installers)
+
+Download desktop installers from the latest public release:
+
+- macOS (Apple Silicon): [Mirabilis.AI-26.2.25-arm64.dmg](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI-26.2.25-arm64.dmg)
+- Windows (x64): [Mirabilis.AI.Setup.26.2.25.exe](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI.Setup.26.2.25.exe)
+
+---
+
 ## Public Repo Notes
 
 Mirabilis is built to be local-first.
@@ -181,6 +195,8 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 ---
 
 ## Desktop App
+
+If you just want to install and run Mirabilis, use the **Desktop Downloads** section above.
 
 Mirabilis can be packaged as a native desktop app (Electron) using the `desktop/` folder.
 The build system stages everything in a temp directory and cleans up automatically — no mess.
