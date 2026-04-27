@@ -49,6 +49,7 @@ Download desktop installers from the latest public release:
 
 - macOS (Apple Silicon): [Mirabilis.AI-26.2.25-arm64.dmg](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI-26.2.25-arm64.dmg)
 - Windows (x64): [Mirabilis.AI.Setup.26.2.25.exe](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI.Setup.26.2.25.exe)
+- Linux (x64): [Mirabilis.AI-26.2.25.AppImage](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI-26.2.25.AppImage)
 
 ---
 
